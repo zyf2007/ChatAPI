@@ -15,10 +15,12 @@ import {
   List,
   Space,
   Spin,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
 import {
+  DeleteOutlined,
   LogoutOutlined,
   MenuOutlined,
   SaveOutlined,
@@ -114,7 +116,11 @@ function App() {
   const [sending, setSending] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
+  const [deletingConversationId, setDeletingConversationId] = useState('')
+  const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const shouldStickToBottomRef = useRef(true)
+  const previousConversationIdRef = useRef('')
 
   const selectedConversation = conversations.find(
     (item) => item.id === selectedConversationId,
@@ -155,8 +161,25 @@ function App() {
   }, [])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, draftBuffer, sending])
+    const conversationChanged =
+      previousConversationIdRef.current !== selectedConversationId
+
+    if (conversationChanged) {
+      previousConversationIdRef.current = selectedConversationId
+      shouldStickToBottomRef.current = true
+    }
+
+    if (!shouldStickToBottomRef.current) return
+
+    const frame = window.requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({
+        behavior: conversationChanged ? 'auto' : 'smooth',
+        block: 'end',
+      })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [selectedConversationId, messages, draftBuffer, sending])
 
   useEffect(() => {
     if (!auth.authenticated) return
@@ -206,13 +229,25 @@ function App() {
   async function loadConversations(nextSelectedId?: string) {
     const data = await requestJson<{ items: Conversation[] }>('/api/conversations')
     setConversations(data.items)
-    const preferred =
+    const requested =
       nextSelectedId ??
       selectedConversationId ??
       localStorage.getItem('chatapi.conversationId') ??
-      data.items[0]?.id ??
       ''
-    if (preferred && preferred !== selectedConversationId) {
+    const preferred = data.items.some((item) => item.id === requested)
+      ? requested
+      : data.items[0]?.id ?? ''
+
+    if (!preferred) {
+      if (selectedConversationId) {
+        setSelectedConversationId('')
+      }
+      setMessages([])
+      localStorage.removeItem('chatapi.conversationId')
+      return
+    }
+
+    if (preferred !== selectedConversationId) {
       setSelectedConversationId(preferred)
       localStorage.setItem('chatapi.conversationId', preferred)
     }
@@ -273,6 +308,42 @@ function App() {
     if (isMobile) setDrawerOpen(false)
   }
 
+  async function handleDeleteConversation(conversationId: string) {
+    const targetConversation = conversations.find((item) => item.id === conversationId)
+    if (targetConversation?.metadata?.realtime_status === 'waiting') {
+      message.warning('等待中的会话不允许删除')
+      return
+    }
+
+    setDeletingConversationId(conversationId)
+    try {
+      await requestJson(`/api/conversations/${conversationId}`, {
+        method: 'DELETE',
+      })
+
+      const remaining = conversations.filter((item) => item.id !== conversationId)
+      const nextConversationId =
+        conversationId === selectedConversationId ? remaining[0]?.id ?? '' : selectedConversationId
+
+      if (!nextConversationId) {
+        setSelectedConversationId('')
+        setMessages([])
+        localStorage.removeItem('chatapi.conversationId')
+      } else if (nextConversationId !== selectedConversationId) {
+        setSelectedConversationId(nextConversationId)
+        localStorage.setItem('chatapi.conversationId', nextConversationId)
+        await loadMessages(nextConversationId)
+      }
+
+      await loadConversations(nextConversationId)
+      message.success('会话已删除')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除会话失败')
+    } finally {
+      setDeletingConversationId('')
+    }
+  }
+
   async function handleDraft() {
     if (!isWaitingForUser) return
     const chunk = composer.trim()
@@ -298,6 +369,13 @@ function App() {
     event.preventDefault()
     if (sending || !isWaitingForUser || !composer.trim()) return
     void handleDraft()
+  }
+
+  function handleChatScroll(event: React.UIEvent<HTMLDivElement>) {
+    const container = event.currentTarget
+    const distanceToBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight
+    shouldStickToBottomRef.current = distanceToBottom <= 80
   }
 
   async function handleSend() {
@@ -366,6 +444,7 @@ function App() {
         renderItem={(item) => {
           const active = item.id === selectedConversationId
           const realtimeStatus = item.metadata?.realtime_status
+          const deleteDisabled = realtimeStatus === 'waiting'
           const statusColor =
             realtimeStatus === 'waiting'
               ? '#22c55e'
@@ -377,37 +456,56 @@ function App() {
               className={`conversation-item ${active ? 'active' : ''}`}
               onClick={() => void handleSelectConversation(item.id)}
             >
-              <Space align="start" className="conversation-row">
-                {statusColor ? (
-                  <Badge dot color={statusColor} offset={[-4, 4]}>
+              <div className="conversation-row">
+                <Space align="start" className="conversation-main">
+                  {statusColor ? (
+                    <Badge dot color={statusColor} offset={[-4, 4]}>
+                      <Avatar shape="square" className="conversation-avatar">
+                        {item.title?.slice(0, 1) || '会'}
+                      </Avatar>
+                    </Badge>
+                  ) : (
                     <Avatar shape="square" className="conversation-avatar">
                       {item.title?.slice(0, 1) || '会'}
                     </Avatar>
-                  </Badge>
-                ) : (
-                  <Avatar shape="square" className="conversation-avatar">
-                    {item.title?.slice(0, 1) || '会'}
-                  </Avatar>
-                )}
-                <div className="conversation-meta">
-                  <Typography.Text className="conversation-title">
-                    {item.title || '新会话'}
-                  </Typography.Text>
-                  <Typography.Paragraph
-                    className="conversation-preview"
-                    ellipsis={{ rows: 2 }}
-                  >
-                    {item.last_message_preview || item.summary || '尚无消息'}
-                  </Typography.Paragraph>
-                  <Typography.Text className="conversation-time">
-                    {item.message_count > 0
-                      ? `${item.message_count} 条消息 · ${formatTime(
-                          item.last_message_at,
-                        )}`
-                      : '空会话'}
-                  </Typography.Text>
-                </div>
-              </Space>
+                  )}
+                  <div className="conversation-meta">
+                    <Typography.Text className="conversation-title">
+                      {item.title || '新会话'}
+                    </Typography.Text>
+                    <Typography.Paragraph
+                      className="conversation-preview"
+                      ellipsis={{ rows: 2 }}
+                    >
+                      {item.last_message_preview || item.summary || '尚无消息'}
+                    </Typography.Paragraph>
+                    <Typography.Text className="conversation-time">
+                      {item.message_count > 0
+                        ? `${item.message_count} 条消息 · ${formatTime(
+                            item.last_message_at,
+                          )}`
+                        : '空会话'}
+                    </Typography.Text>
+                  </div>
+                </Space>
+                <Tooltip
+                  title={deleteDisabled ? '等待中的会话不允许删除' : '删除会话'}
+                >
+                  <Button
+                    type="text"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    className="conversation-delete-button"
+                    loading={deletingConversationId === item.id}
+                    disabled={deleteDisabled}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void handleDeleteConversation(item.id)
+                    }}
+                  />
+                </Tooltip>
+              </div>
             </List.Item>
           )
         }}
@@ -452,7 +550,11 @@ function App() {
         </Space>
       </div>
 
-      <div className="chat-scroll">
+      <div
+        ref={chatScrollRef}
+        className="chat-scroll"
+        onScroll={handleChatScroll}
+      >
         {visibleMessages.length === 0 ? (
           <div className="empty-stage">
             <Empty

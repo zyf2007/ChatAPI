@@ -264,6 +264,25 @@ class ConversationStore:
             ).fetchall()
         return [self._row_to_conversation(row) for row in rows]
 
+    def delete_conversation(self, conversation_id: str, owner_id: str) -> None:
+        if self.get_conversation(conversation_id, owner_id) is None:
+            raise ValueError("conversation not found")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM messages
+                WHERE conversation_id = ?
+                """,
+                (conversation_id,),
+            )
+            conn.execute(
+                """
+                DELETE FROM conversations
+                WHERE id = ? AND owner_id = ?
+                """,
+                (conversation_id, owner_id),
+            )
+
     def get_messages(self, conversation_id: str, owner_id: str) -> list[ConversationMessage]:
         if self.get_conversation(conversation_id, owner_id) is None:
             raise ValueError("conversation not found")

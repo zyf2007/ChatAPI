@@ -115,6 +115,15 @@
 
 .conversation-row {
   width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.conversation-main {
+  width: 100%;
+  min-width: 0;
+  flex: 1;
   gap: 10px !important;
 }
 
@@ -131,6 +140,17 @@
 .conversation-meta {
   min-width: 0;
   flex: 1;
+}
+
+.conversation-delete-button {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: #94a3b8;
+}
+
+.conversation-delete-button:hover {
+  color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.08) !important;
 }
 
 .conversation-title {

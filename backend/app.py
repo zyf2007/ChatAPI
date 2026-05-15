@@ -494,6 +494,15 @@ def create_app() -> Flask:
             return jsonify({"error": "conversation not found"}), 404
         return {"ok": True, "items": [message.to_dict() for message in messages]}
 
+    @app.delete("/api/conversations/<conversation_id>")
+    @require_auth
+    def delete_conversation(conversation_id: str):
+        try:
+            store.delete_conversation(conversation_id, owner_id())
+        except ValueError:
+            return jsonify({"error": "conversation not found"}), 404
+        return {"ok": True}
+
     @app.post("/api/conversations/<conversation_id>/rename")
     @require_auth
     def rename_conversation(conversation_id: str):
