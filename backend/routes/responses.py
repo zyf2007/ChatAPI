@@ -8,7 +8,11 @@ from flask import Flask, jsonify, request
 
 from ..core import AppDependencies
 from ..repositories import build_title
-from ..services.assistant import build_openai_error, build_openai_response
+from ..services.response_payloads import (
+    build_openai_error,
+    build_openai_response,
+    estimate_usage,
+)
 from ..services.ntfy import notify_new_message
 from ..services.pending import PendingTurn
 from ..services.response_stream import (
@@ -21,7 +25,6 @@ from ..services.response_stream import (
 def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
     auth = deps.auth
     store = deps.store
-    assistant = deps.assistant
     pending_turns = deps.pending_turns
     settings = deps.settings
     message_rate_limiter = deps.message_rate_limiter
@@ -270,7 +273,7 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
         if not context_text:
             return build_openai_error("input is required")
 
-        model = str(data.get("model") or settings.upstream_model or "local-fallback")
+        model = str(data.get("model") or "mock-gpt-4.1-mini")
         owner = auth.owner_id()
         if not message_rate_limiter.allow(owner):
             return build_openai_error(
@@ -306,18 +309,12 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
             owner,
             title=conversation.title if conversation.title not in {"新会话", "New conversation", ""} else build_title(context_text),
             last_user_text=context_text[:1000],
-            context_signature="",
         )
         pending = pending_turns.register(
             conversation_id=conversation.id,
             owner_id=owner,
             model=model,
             input_text=context_text,
-            input_payload=response_input_payload(data),
-            request_data=data,
-            request_context_signature="",
-            conversation_title=updated_conversation.title,
-            previous_summary=updated_conversation.summary,
             **get_stream_heartbeat_settings(),
         )
         try:
@@ -375,36 +372,13 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
         return pending, updated_conversation
 
     def finalize_pending_turn(pending: PendingTurn) -> dict[str, Any]:
-        if pending.persisted:
-            updated_conversation = store.get_conversation(
-                pending.conversation_id,
-                pending.owner_id,
-            )
-            if updated_conversation is None:
-                raise ValueError("conversation not found")
-        else:
-            updated_conversation = store.record_assistant_reply(
-                pending.conversation_id,
-                pending.owner_id,
-                pending.input_text,
-                pending.assistant_text,
-                response_id=pending.response_id,
-                context_signature="",
-                assistant_metadata={
-                    "provider": "human",
-                    "model": pending.model,
-                },
-            )
-            store.update_conversation(
-                pending.conversation_id,
-                pending.owner_id,
-                metadata={
-                    **updated_conversation.metadata,
-                    "realtime_status": "closed",
-                    "realtime_draft_text": "",
-                },
-            )
-        usage = assistant._usage_from_texts(pending.input_text, pending.assistant_text)
+        updated_conversation = store.get_conversation(
+            pending.conversation_id,
+            pending.owner_id,
+        )
+        if updated_conversation is None:
+            raise ValueError("conversation not found")
+        usage = estimate_usage(pending.input_text, pending.assistant_text)
         payload = build_openai_response(
             response_id=pending.response_id,
             model=pending.model,
@@ -429,7 +403,6 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
             return stream_pending_turn(
                 pending,
                 pending_turns=pending_turns,
-                assistant=assistant,
                 store=store,
                 build_abort_error=build_abort_error,
                 client_socket=request.environ.get("werkzeug.socket"),
@@ -513,7 +486,7 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                 output_text = ""
                 assistant_metadata = {
                     "provider": "human",
-                    "model": str(data.get("model") or pending.model or settings.upstream_model),
+                    "model": str(data.get("model") or pending.model or "mock-gpt-4.1-mini"),
                     "response_mode": "tool_call",
                     "tool_name": tool_name,
                     "tool_call_id": tool_call_id,
@@ -530,7 +503,7 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                 output_text = assistant_text
                 assistant_metadata = {
                     "provider": "human",
-                    "model": str(data.get("model") or pending.model or settings.upstream_model),
+                    "model": str(data.get("model") or pending.model or "mock-gpt-4.1-mini"),
                     "response_mode": "assistant_message",
                 }
             updated_conversation = store.record_assistant_reply(
@@ -539,7 +512,6 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                 pending.input_text,
                 assistant_text,
                 response_id=response_id,
-                context_signature="",
                 assistant_metadata=assistant_metadata,
             )
             store.update_conversation(
@@ -559,7 +531,6 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                 response_mode=mode,
                 response_output_items=output_items,
                 response_output_text=output_text,
-                response_metadata=assistant_metadata,
             )
         except ValueError as error:
             return {"error": str(error)}, 409

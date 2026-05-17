@@ -5,7 +5,7 @@ from flask_cors import CORS
 
 from .core import AppDependencies, AuthContext, settings
 from .repositories import ConversationStore
-from .services import AssistantService, MessageRateLimiter, PendingTurnRegistry
+from .services import MessageRateLimiter, PendingTurnRegistry
 from .routes import (
     register_auth_routes,
     register_conversation_routes,
@@ -19,7 +19,6 @@ def create_app() -> Flask:
     CORS(app, supports_credentials=True, origins=settings.cors_origins)
 
     store = ConversationStore(settings.db_path)
-    assistant = AssistantService(settings)
     auth = AuthContext(settings)
     pending_turns = PendingTurnRegistry()
     message_rate_limiter = MessageRateLimiter(
@@ -29,12 +28,10 @@ def create_app() -> Flask:
         settings=settings,
         auth=auth,
         store=store,
-        assistant=assistant,
         pending_turns=pending_turns,
         message_rate_limiter=message_rate_limiter,
     )
     app.extensions["chat_store"] = store
-    app.extensions["assistant_service"] = assistant
 
     @app.get("/api/health")
     def health():

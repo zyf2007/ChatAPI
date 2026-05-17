@@ -60,9 +60,6 @@ class Settings:
     session_secret: str
     api_key: str
     db_path: Path
-    upstream_responses_url: str
-    upstream_api_key: str
-    upstream_model: str
     cors_origins: list[str]
     host: str
     port: int
@@ -86,22 +83,6 @@ class Settings:
             "CORS_ORIGINS",
             default="http://localhost:5173,http://127.0.0.1:5173",
         )
-        upstream_base_url = _first_non_empty(
-            "CHATAPI_UPSTREAM_RESPONSES_URL",
-            "OPENAI_RESPONSES_URL",
-            default="",
-        )
-        if not upstream_base_url:
-            upstream_api_base = _first_non_empty(
-                "CHATAPI_UPSTREAM_BASE_URL",
-                "OPENAI_BASE_URL",
-                default="",
-            )
-            upstream_base_url = (
-                f"{upstream_api_base.rstrip('/')}/responses"
-                if upstream_api_base
-                else ""
-            )
         tls_cert_raw = _first_non_empty(
             "CHATAPI_TLS_CERT_FILE",
             "TLS_CERT_FILE",
@@ -129,19 +110,8 @@ class Settings:
                 "ADMIN_SESSION_SECRET",
                 default="change-this-session-secret",
             ),
-            api_key=_first_non_empty("CHATAPI_API_KEY", "OPENAI_API_KEY", default=""),
+            api_key=_first_non_empty("CHATAPI_API_KEY", default=""),
             db_path=db_path,
-            upstream_responses_url=upstream_base_url,
-            upstream_api_key=_first_non_empty(
-                "CHATAPI_UPSTREAM_API_KEY",
-                "OPENAI_API_KEY",
-                default="",
-            ),
-            upstream_model=_first_non_empty(
-                "CHATAPI_MODEL",
-                "OPENAI_MODEL",
-                default="gpt-4.1-mini",
-            ),
             cors_origins=_split_csv(cors_raw),
             host=_first_non_empty("CHATAPI_HOST", "BACKEND_HOST", default="0.0.0.0"),
             port=int(_first_non_empty("CHATAPI_PORT", "BACKEND_PORT", default="5000")),

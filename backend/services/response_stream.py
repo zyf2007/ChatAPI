@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from flask import Response, stream_with_context
 
-from .assistant import build_openai_response
+from .response_payloads import build_openai_response, estimate_usage
 from .pending import PendingTurn, PendingTurnRegistry
 
 
@@ -54,7 +54,6 @@ def build_stream_response_base(
     pending: PendingTurn,
     conversation_id: str,
     status: str,
-    assistant: Any,
     assistant_text: str = "",
     usage: dict[str, int] | None = None,
     output_items: list[dict[str, Any]] | None = None,
@@ -65,7 +64,7 @@ def build_stream_response_base(
         model=pending.model,
         conversation_id=conversation_id,
         assistant_text=assistant_text,
-        usage=usage or assistant._usage_from_texts(pending.input_text, assistant_text),
+        usage=usage or estimate_usage(pending.input_text, assistant_text),
         status=status,
         output_items=output_items,
         output_text=output_text,
@@ -85,7 +84,6 @@ def stream_pending_turn(
     pending: PendingTurn,
     *,
     pending_turns: PendingTurnRegistry,
-    assistant: Any,
     store: Any,
     build_abort_error: Callable[[str], tuple[dict[str, Any], int]],
     client_socket: Any,
@@ -150,7 +148,6 @@ def stream_pending_turn(
                         pending=pending,
                         conversation_id=pending.conversation_id,
                         status="in_progress",
-                        assistant=assistant,
                     ),
                 },
             )
@@ -162,7 +159,6 @@ def stream_pending_turn(
                         pending=pending,
                         conversation_id=pending.conversation_id,
                         status="in_progress",
-                        assistant=assistant,
                     ),
                 },
             )
@@ -217,7 +213,6 @@ def stream_pending_turn(
                             pending=finalized,
                             conversation_id=finalized.conversation_id,
                             status="failed",
-                            assistant=assistant,
                             assistant_text="",
                             usage=None,
                             output_items=[],
@@ -318,7 +313,7 @@ def stream_pending_turn(
                                 },
                             },
                         )
-                    usage = assistant._usage_from_texts(finalized.input_text, final_text)
+                    usage = estimate_usage(finalized.input_text, final_text)
                     yield emit(
                         "response.completed",
                         {
@@ -327,7 +322,6 @@ def stream_pending_turn(
                                 pending=finalized,
                                 conversation_id=finalized.conversation_id,
                                 status="completed",
-                                assistant=assistant,
                                 assistant_text=final_text,
                                 usage=usage,
                                 output_items=output_items,

@@ -218,7 +218,7 @@ export function ChatPane(props: ChatPaneProps) {
             <Empty
               description={
                 isWaitingForUser
-                  ? '可以开始分段暂存回复，再点击发送结束这一轮'
+                  ? '可以开始流式输出，再点击结束输出完成这一轮'
                   : '等待左侧会话出现绿色状态后再回复'
               }
               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -330,7 +330,7 @@ export function ChatPane(props: ChatPaneProps) {
                   <div className="message-meta">
                     <span>
                       {isDraft
-                        ? '暂存草稿'
+                        ? '流式输出中'
                         : isToolInput
                           ? 'tool'
                           : isToolCall
@@ -366,7 +366,7 @@ export function ChatPane(props: ChatPaneProps) {
           <Space direction="vertical" size={12} className="composer-stack">
             {draftBuffer && (
               <div className="draft-banner">
-                <span>已暂存 {draftBuffer.length} 字</span>
+                <span>已流式输出 {draftBuffer.length} 字</span>
                 <Button
                   size="small"
                   disabled={composerMode !== 'assistant_message'}
@@ -446,7 +446,7 @@ export function ChatPane(props: ChatPaneProps) {
                         />
                       ))
                     ) : (
-                      <div className="tool-form-empty">当前 tool 没有参数，直接点击发送即可。</div>
+                      <div className="tool-form-empty">当前 tool 没有参数，直接点击结束输出即可。</div>
                     )}
                   </div>
                 ) : (
@@ -461,7 +461,7 @@ export function ChatPane(props: ChatPaneProps) {
                 onKeyDown={handleComposerKeyDown}
                 placeholder={
                   isWaitingForUser
-                    ? '输入你作为 assistant 的回复。点“暂存”会把当前内容累积到这轮回复里，点“发送”会结束这一轮。'
+                    ? '输入你作为 assistant 的回复。点“流式输出”会把当前内容追加到这轮回复里，点“结束输出”会结束这一轮。'
                     : '当前没有等待中的 user 请求。'
                 }
                 autoSize={{ minRows: 4, maxRows: 10 }}
@@ -474,9 +474,9 @@ export function ChatPane(props: ChatPaneProps) {
             <Typography.Text className="composer-hint">
               {isWaitingForUser
                 ? composerMode === 'assistant_message'
-                  ? '暂存的片段会保留在本轮回复里，发送之后这一轮结束。'
-                  : 'Tool Call 模式会根据 schema 组装参数 JSON，发送后会返回一个 function_call item。'
-                : '没有新的 user 请求时不能发送回复。'}
+                  ? '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
+                  : 'Tool Call 模式会根据 schema 组装参数 JSON，结束输出后会返回一个 function_call item。'
+                : '没有新的 user 请求时不能输出回复。'}
             </Typography.Text>
             <Space>
               <Button
@@ -489,7 +489,7 @@ export function ChatPane(props: ChatPaneProps) {
                   composerMode !== 'assistant_message'
                 }
               >
-                暂存
+                流式输出
               </Button>
               <Button
                 type="primary"
@@ -504,7 +504,7 @@ export function ChatPane(props: ChatPaneProps) {
                     : !toolName.trim())
                 }
               >
-                发送
+                结束输出
               </Button>
             </Space>
           </Flex>

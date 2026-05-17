@@ -41,9 +41,7 @@ class Conversation:
     id: str
     owner_id: str
     title: str
-    summary: str
     last_user_text: str
-    context_signature: str
     created_at: str
     updated_at: str
     last_message_at: str
@@ -56,9 +54,7 @@ class Conversation:
             "id": self.id,
             "owner_id": self.owner_id,
             "title": self.title,
-            "summary": self.summary,
             "last_user_text": self.last_user_text,
-            "context_signature": self.context_signature,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "last_message_at": self.last_message_at,
@@ -124,9 +120,7 @@ class ConversationStore:
                     id TEXT PRIMARY KEY,
                     owner_id TEXT NOT NULL,
                     title TEXT NOT NULL,
-                    summary TEXT NOT NULL DEFAULT '',
                     last_user_text TEXT NOT NULL DEFAULT '',
-                    context_signature TEXT NOT NULL DEFAULT '',
                     metadata TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
@@ -175,12 +169,6 @@ class ConversationStore:
                 "last_user_text",
                 "TEXT NOT NULL DEFAULT ''",
             )
-            self._ensure_column(
-                conn,
-                "conversations",
-                "context_signature",
-                "TEXT NOT NULL DEFAULT ''",
-            )
 
     def _ensure_column(
         self, conn: sqlite3.Connection, table: str, column: str, ddl: str
@@ -194,9 +182,7 @@ class ConversationStore:
         self,
         owner_id: str,
         title: str = "新会话",
-        summary: str = "",
         last_user_text: str = "",
-        context_signature: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Conversation:
         now = utc_now_iso()
@@ -204,9 +190,7 @@ class ConversationStore:
             id=str(uuid.uuid4()),
             owner_id=owner_id,
             title=title or "新会话",
-            summary=summary,
             last_user_text=last_user_text,
-            context_signature=context_signature,
             created_at=now,
             updated_at=now,
             last_message_at=now,
@@ -218,16 +202,14 @@ class ConversationStore:
             conn.execute(
                 """
                 INSERT INTO conversations
-                (id, owner_id, title, summary, last_user_text, context_signature, metadata, created_at, updated_at, last_message_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, owner_id, title, last_user_text, metadata, created_at, updated_at, last_message_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     conv.id,
                     conv.owner_id,
                     conv.title,
-                    conv.summary,
                     conv.last_user_text,
-                    conv.context_signature,
                     _json_dump(conv.metadata),
                     conv.created_at,
                     conv.updated_at,
@@ -442,17 +424,12 @@ class ConversationStore:
             conn.execute(
                 """
                 UPDATE conversations
-                SET updated_at = ?, last_message_at = ?, summary = CASE
-                    WHEN summary = '' THEN ?
-                    ELSE substr(summary || '\n' || ?, 1, 1000)
-                END
+                SET updated_at = ?, last_message_at = ?
                 WHERE id = ?
                 """,
                 (
                     message.created_at,
                     message.created_at,
-                    content[:240],
-                    content[:240],
                     conversation_id,
                 ),
             )
@@ -464,33 +441,25 @@ class ConversationStore:
         owner_id: str,
         *,
         title: str | None = None,
-        summary: str | None = None,
         last_user_text: str | None = None,
-        context_signature: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Conversation:
         current = self.get_conversation(conversation_id, owner_id)
         if current is None:
             raise ValueError("conversation not found")
         new_title = title if title is not None else current.title
-        new_summary = summary if summary is not None else current.summary
         new_last_user_text = last_user_text if last_user_text is not None else current.last_user_text
-        new_context_signature = (
-            context_signature if context_signature is not None else current.context_signature
-        )
         new_metadata = metadata if metadata is not None else current.metadata
         with self._connection() as conn:
             conn.execute(
                 """
                 UPDATE conversations
-                SET title = ?, summary = ?, last_user_text = ?, context_signature = ?, metadata = ?, updated_at = ?
+                SET title = ?, last_user_text = ?, metadata = ?, updated_at = ?
                 WHERE id = ? AND owner_id = ?
                 """,
                 (
                     new_title,
-                    new_summary,
                     new_last_user_text,
-                    new_context_signature,
                     _json_dump(new_metadata),
                     utc_now_iso(),
                     conversation_id,
@@ -527,54 +496,6 @@ class ConversationStore:
                 (key, value),
             )
 
-    def record_turn(
-        self,
-        conversation_id: str,
-        owner_id: str,
-        user_text: str,
-        assistant_text: str,
-        response_id: str,
-        context_signature: str | None = None,
-        assistant_metadata: dict[str, Any] | None = None,
-    ) -> Conversation:
-        if self.get_conversation(conversation_id, owner_id) is None:
-            raise ValueError("conversation not found")
-        self.add_message(
-            conversation_id,
-            "user",
-            user_text,
-            metadata={"turn": "user"},
-        )
-        self.add_message(
-            conversation_id,
-            "assistant",
-            assistant_text,
-            response_id=response_id,
-            metadata=assistant_metadata or {},
-        )
-        current = self.get_conversation(conversation_id, owner_id)
-        if current is None:
-            raise ValueError("conversation not found")
-        if current.title in {"新会话", "New conversation", ""}:
-            self.update_conversation(
-                conversation_id,
-                owner_id,
-                title=build_title(user_text),
-                last_user_text=user_text[:1000],
-                context_signature=context_signature or current.context_signature,
-            )
-        else:
-            self.update_conversation(
-                conversation_id,
-                owner_id,
-                last_user_text=user_text[:1000],
-                context_signature=context_signature or current.context_signature,
-            )
-        refreshed = self.get_conversation(conversation_id, owner_id)
-        if refreshed is None:
-            raise ValueError("conversation not found")
-        return refreshed
-
     def record_assistant_reply(
         self,
         conversation_id: str,
@@ -582,7 +503,6 @@ class ConversationStore:
         user_text: str,
         assistant_text: str,
         response_id: str,
-        context_signature: str | None = None,
         assistant_metadata: dict[str, Any] | None = None,
     ) -> Conversation:
         if self.get_conversation(conversation_id, owner_id) is None:
@@ -603,14 +523,12 @@ class ConversationStore:
                 owner_id,
                 title=build_title(user_text),
                 last_user_text=user_text[:1000],
-                context_signature=context_signature or current.context_signature,
             )
         else:
             self.update_conversation(
                 conversation_id,
                 owner_id,
                 last_user_text=user_text[:1000],
-                context_signature=context_signature or current.context_signature,
             )
         refreshed = self.get_conversation(conversation_id, owner_id)
         if refreshed is None:
@@ -623,9 +541,7 @@ class ConversationStore:
             id=str(row["id"]),
             owner_id=str(row["owner_id"]),
             title=str(row["title"]),
-            summary=str(row["summary"]),
             last_user_text=str(row["last_user_text"] or ""),
-            context_signature=str(row["context_signature"] or ""),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
             last_message_at=str(row["last_message_at"]),

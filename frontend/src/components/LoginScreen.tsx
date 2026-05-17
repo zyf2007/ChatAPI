@@ -14,15 +14,9 @@ export function LoginScreen({ loading, onSubmit }: LoginScreenProps) {
     <div className="login-screen">
       <div className="login-backdrop" />
       <Card className="login-card">
-        <div className="login-copy">
-          <Typography.Text className="eyebrow">ChatAPI</Typography.Text>
-          <Typography.Title level={2} className="login-title">
-            登录后进入聊天工作台
-          </Typography.Title>
-          <Typography.Paragraph className="login-desc">
-            后端提供 OpenAI Responses 风格接口，前端负责会话列表、移动端侧栏和分段暂存。
-          </Typography.Paragraph>
-        </div>
+        <Typography.Title level={2} className="login-title">
+          ChatAPI 登录
+        </Typography.Title>
         <Form
           form={form}
           layout="vertical"

@@ -1,3 +1,8 @@
+.is-resizing-sidebar {
+  cursor: col-resize;
+  user-select: none;
+}
+
 .app-shell {
   height: 100svh;
   overflow: hidden;
@@ -13,14 +18,42 @@
   background: linear-gradient(180deg, #f5f7fb 0%, #eef2f7 100%);
 }
 
+.sidebar-shell {
+  position: relative;
+  height: 100svh;
+  flex: 0 0 auto;
+  transition: width 0.18s ease;
+}
+
 .sidebar {
   height: 100svh;
   background: #f8fafc !important;
-  flex: 0 0 288px !important;
-  max-width: 288px !important;
-  min-width: 288px !important;
-  width: 288px !important;
   border-right: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 2px;
+  height: 100%;
+  background: rgba(148, 163, 184, 0.18);
+  transition: background 0.16s ease;
+}
+
+.sidebar-resizer:hover::after {
+  background: rgba(59, 130, 246, 0.42);
 }
 
 .sidebar-inner {
@@ -30,6 +63,14 @@
   overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.9));
+}
+
+.sidebar-inner.collapsed .sidebar-top {
+  padding-inline: 10px;
+}
+
+.sidebar-top-copy {
+  min-width: 0;
 }
 
 .sidebar-top {
@@ -70,6 +111,11 @@
 .sidebar-action-button:hover {
   color: #ef4444 !important;
   background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.sidebar-inner.collapsed .eyebrow {
+  writing-mode: vertical-rl;
+  letter-spacing: 0.08em;
 }
 
 .new-chat-button {
@@ -138,6 +184,10 @@
   gap: 10px !important;
 }
 
+.sidebar-inner.collapsed .conversation-main {
+  justify-content: center;
+}
+
 .conversation-avatar {
   width: 32px !important;
   height: 32px !important;
@@ -203,6 +253,12 @@
   background: rgba(248, 250, 252, 0.96);
   display: grid;
   gap: 10px;
+}
+
+.sidebar-footer-collapsed {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
 }
 
 .footer-stack {
@@ -828,7 +884,21 @@
   border-right: 0;
 }
 
+.login-card .ant-card-body {
+  display: grid;
+  gap: 18px;
+}
+
+.login-title {
+  margin: 0 !important;
+  text-align: center;
+}
+
 @media (max-width: 768px) {
+  .sidebar-shell {
+    display: none;
+  }
+
   .sidebar-top {
     padding-top: calc(env(safe-area-inset-top) + 10px);
   }

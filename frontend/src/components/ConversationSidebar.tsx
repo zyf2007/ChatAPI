@@ -12,7 +12,14 @@ import {
   Tooltip,
   Typography,
 } from 'antd'
-import { DeleteOutlined, LogoutOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons'
+import {
+  DeleteOutlined,
+  LeftOutlined,
+  LogoutOutlined,
+  RightOutlined,
+  SettingOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
 
 import { formatTime } from '../lib/chat-format'
 import type { AuthSession, Conversation } from '../types/chat'
@@ -22,12 +29,14 @@ type ConversationSidebarProps = {
   abortReason: string
   abortingConversationId: string
   auth: AuthSession
+  collapsed: boolean
   conversations: Conversation[]
   deletingConversationId: string
   onAbortConversation: (conversationId: string) => void | Promise<void>
   onDeleteConversation: (conversationId: string) => void | Promise<void>
   onLogout: () => void | Promise<void>
   onSelectConversation: (conversationId: string) => void | Promise<void>
+  onToggleCollapsed: () => void
   pruneKeepCount: number
   pruneModalOpen: boolean
   pruningConversations: boolean
@@ -52,6 +61,7 @@ export function ConversationSidebar({
   abortReason,
   abortingConversationId,
   auth,
+  collapsed,
   conversations,
   deletingConversationId,
   onAbortConversation,
@@ -60,6 +70,7 @@ export function ConversationSidebar({
   onPruneConversations,
   onSaveStreamHeartbeatConfig,
   onSelectConversation,
+  onToggleCollapsed,
   pruneKeepCount,
   pruneModalOpen,
   pruningConversations,
@@ -77,24 +88,39 @@ export function ConversationSidebar({
   streamHeartbeatText,
 }: ConversationSidebarProps) {
   return (
-    <div className="sidebar-inner">
+    <div className={`sidebar-inner ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-top">
-        <div>
+        <div className="sidebar-top-copy">
           <Typography.Text className="eyebrow">ChatAPI</Typography.Text>
-          <Typography.Title level={4} className="sidebar-title">
-            会话
-          </Typography.Title>
+          {!collapsed ? (
+            <Typography.Title level={4} className="sidebar-title">
+              会话
+            </Typography.Title>
+          ) : null}
         </div>
-        <Tooltip title="删除最近 N 个会话以外的会话">
-          <Button
-            type="text"
-            danger
-            size="small"
-            icon={<DeleteOutlined />}
-            className="sidebar-action-button"
-            onClick={() => setPruneModalOpen(true)}
-          />
-        </Tooltip>
+        <Space size={4}>
+          <Tooltip title={collapsed ? '展开侧边栏' : '收起侧边栏'}>
+            <Button
+              type="text"
+              size="small"
+              icon={collapsed ? <RightOutlined /> : <LeftOutlined />}
+              className="sidebar-action-button"
+              onClick={onToggleCollapsed}
+            />
+          </Tooltip>
+          {!collapsed ? (
+            <Tooltip title="删除最近 N 个会话以外的会话">
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                className="sidebar-action-button"
+                onClick={() => setPruneModalOpen(true)}
+              />
+            </Tooltip>
+          ) : null}
+        </Space>
       </div>
       <List
         className="conversation-list"
@@ -129,22 +155,24 @@ export function ConversationSidebar({
                       {item.title?.slice(0, 1) || '会'}
                     </Avatar>
                   )}
-                  <div className="conversation-meta">
-                    <Typography.Text className="conversation-title">
-                      {item.title || '新会话'}
-                    </Typography.Text>
-                    <Typography.Paragraph
-                      className="conversation-preview"
-                      ellipsis={{ rows: 2 }}
-                    >
-                      {item.last_message_preview || item.summary || '尚无消息'}
-                    </Typography.Paragraph>
-                    <Typography.Text className="conversation-time">
-                      {item.message_count > 0
-                        ? `${item.message_count} 条消息 · ${formatTime(item.last_message_at)}`
-                        : '空会话'}
-                    </Typography.Text>
-                  </div>
+                  {!collapsed ? (
+                    <div className="conversation-meta">
+                      <Typography.Text className="conversation-title">
+                        {item.title || '新会话'}
+                      </Typography.Text>
+                      <Typography.Paragraph
+                        className="conversation-preview"
+                        ellipsis={{ rows: 2 }}
+                      >
+                        {item.last_message_preview || item.last_user_text || '尚无消息'}
+                      </Typography.Paragraph>
+                      <Typography.Text className="conversation-time">
+                        {item.message_count > 0
+                          ? `${item.message_count} 条消息 · ${formatTime(item.last_message_at)}`
+                          : '空会话'}
+                      </Typography.Text>
+                    </div>
+                  ) : null}
                 </Space>
                 {isWaiting ? (
                   <Popover
@@ -216,20 +244,38 @@ export function ConversationSidebar({
         }}
       />
       <div className="sidebar-footer">
-        <div className="footer-head">
-          <Typography.Text className="footer-name">{auth.user?.username}</Typography.Text>
-          <Tooltip title="流式保活设置">
-            <Button
-              type="text"
-              icon={<SettingOutlined />}
-              className="footer-settings-button"
-              onClick={() => setStreamHeartbeatModalOpen(true)}
-            />
-          </Tooltip>
-        </div>
-        <Button icon={<LogoutOutlined />} onClick={() => void onLogout()} block>
-          退出登录
-        </Button>
+        {!collapsed ? (
+          <>
+            <div className="footer-head">
+              <Typography.Text className="footer-name">{auth.user?.username}</Typography.Text>
+              <Tooltip title="流式保活设置">
+                <Button
+                  type="text"
+                  icon={<SettingOutlined />}
+                  className="footer-settings-button"
+                  onClick={() => setStreamHeartbeatModalOpen(true)}
+                />
+              </Tooltip>
+            </div>
+            <Button icon={<LogoutOutlined />} onClick={() => void onLogout()} block>
+              退出登录
+            </Button>
+          </>
+        ) : (
+          <div className="sidebar-footer-collapsed">
+            <Tooltip title="流式保活设置">
+              <Button
+                type="text"
+                icon={<SettingOutlined />}
+                className="footer-settings-button"
+                onClick={() => setStreamHeartbeatModalOpen(true)}
+              />
+            </Tooltip>
+            <Tooltip title="退出登录">
+              <Button type="text" icon={<LogoutOutlined />} onClick={() => void onLogout()} />
+            </Tooltip>
+          </div>
+        )}
       </div>
       <Modal
         title="批量删除旧会话"
