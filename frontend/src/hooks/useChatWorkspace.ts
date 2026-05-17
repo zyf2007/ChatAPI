@@ -14,6 +14,7 @@ import type {
   Conversation,
   MessageItem,
   ResponsesPayload,
+  StreamHeartbeatConfig,
   ToolFieldValue,
   VisibleMessage,
 } from '../types/chat'
@@ -46,6 +47,10 @@ export function useChatWorkspace(isMobile: boolean) {
   const [abortingConversationId, setAbortingConversationId] = useState('')
   const [abortPopoverConversationId, setAbortPopoverConversationId] = useState('')
   const [abortReason, setAbortReason] = useState('')
+  const [streamHeartbeatModalOpen, setStreamHeartbeatModalOpen] = useState(false)
+  const [streamHeartbeatText, setStreamHeartbeatText] = useState('')
+  const [streamHeartbeatIntervalSeconds, setStreamHeartbeatIntervalSeconds] = useState<number>(0)
+  const [savingStreamHeartbeatConfig, setSavingStreamHeartbeatConfig] = useState(false)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const shouldStickToBottomRef = useRef(true)
@@ -84,6 +89,7 @@ export function useChatWorkspace(isMobile: boolean) {
         if (!active) return
         setAuth(session)
         if (session.authenticated) {
+          await loadStreamHeartbeatConfig()
           await loadConversations()
         }
       } catch (error) {
@@ -229,6 +235,7 @@ export function useChatWorkspace(isMobile: boolean) {
       })
       const session = await requestJson<AuthSession>('/api/auth/session')
       setAuth(session)
+      await loadStreamHeartbeatConfig()
       await loadConversations()
       message.success('登录成功')
     } catch (error) {
@@ -252,8 +259,52 @@ export function useChatWorkspace(isMobile: boolean) {
       setToolCallId('')
       setToolFormValues({})
       setDraftBuffer('')
+      setStreamHeartbeatModalOpen(false)
+      setStreamHeartbeatText('')
+      setStreamHeartbeatIntervalSeconds(0)
       localStorage.removeItem(STORAGE_KEY)
       message.info('已退出登录')
+    }
+  }
+
+  async function loadStreamHeartbeatConfig() {
+    const data = await requestJson<StreamHeartbeatConfig & { ok?: boolean }>(
+      '/api/config/stream-heartbeat',
+    )
+    setStreamHeartbeatText(data.heartbeat_text ?? '')
+    setStreamHeartbeatIntervalSeconds(
+      typeof data.heartbeat_interval_seconds === 'number'
+        ? data.heartbeat_interval_seconds
+        : 0,
+    )
+  }
+
+  async function handleSaveStreamHeartbeatConfig() {
+    if (streamHeartbeatIntervalSeconds < 0) {
+      message.warning('间隔时间必须大于等于 0')
+      return
+    }
+
+    setSavingStreamHeartbeatConfig(true)
+    try {
+      const response = await requestJson<StreamHeartbeatConfig & { ok: boolean }>(
+        '/api/config/stream-heartbeat',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            heartbeat_text: streamHeartbeatText,
+            heartbeat_interval_seconds: streamHeartbeatIntervalSeconds,
+          }),
+        },
+      )
+      setStreamHeartbeatText(response.heartbeat_text)
+      setStreamHeartbeatIntervalSeconds(response.heartbeat_interval_seconds)
+      setStreamHeartbeatModalOpen(false)
+      message.success('设置已保存')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '设置保存失败')
+    } finally {
+      setSavingStreamHeartbeatConfig(false)
     }
   }
 
@@ -508,6 +559,7 @@ export function useChatWorkspace(isMobile: boolean) {
     pruneKeepCount,
     pruneModalOpen,
     pruningConversations,
+    savingStreamHeartbeatConfig,
     selectedConversation,
     selectedConversationId,
     selectedToolSchema,
@@ -520,12 +572,19 @@ export function useChatWorkspace(isMobile: boolean) {
     setDraftBuffer,
     setPruneKeepCount,
     setPruneModalOpen,
+    setStreamHeartbeatIntervalSeconds,
+    setStreamHeartbeatModalOpen,
+    setStreamHeartbeatText,
     setToolCallId,
     setToolFormValues,
     setToolName,
+    streamHeartbeatIntervalSeconds,
+    streamHeartbeatModalOpen,
+    streamHeartbeatText,
     toolCallId,
     toolFormValues,
     toolName,
     visibleMessages,
+    handleSaveStreamHeartbeatConfig,
   }
 }

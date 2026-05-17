@@ -46,11 +46,19 @@ function App() {
       pruneKeepCount={workspace.pruneKeepCount}
       pruneModalOpen={workspace.pruneModalOpen}
       pruningConversations={workspace.pruningConversations}
+      savingStreamHeartbeatConfig={workspace.savingStreamHeartbeatConfig}
       selectedConversationId={workspace.selectedConversationId}
       setAbortPopoverConversationId={workspace.setAbortPopoverConversationId}
       setAbortReason={workspace.setAbortReason}
       setPruneKeepCount={workspace.setPruneKeepCount}
       setPruneModalOpen={workspace.setPruneModalOpen}
+      setStreamHeartbeatIntervalSeconds={workspace.setStreamHeartbeatIntervalSeconds}
+      setStreamHeartbeatModalOpen={workspace.setStreamHeartbeatModalOpen}
+      setStreamHeartbeatText={workspace.setStreamHeartbeatText}
+      streamHeartbeatIntervalSeconds={workspace.streamHeartbeatIntervalSeconds}
+      streamHeartbeatModalOpen={workspace.streamHeartbeatModalOpen}
+      streamHeartbeatText={workspace.streamHeartbeatText}
+      onSaveStreamHeartbeatConfig={workspace.handleSaveStreamHeartbeatConfig}
     />
   )
 

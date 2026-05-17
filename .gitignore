@@ -1,5 +1,5 @@
 # Environment
-.env
+*/.env
 .env.*
 !.env.example
 
@@ -29,15 +29,15 @@ venv/
 env/
 
 # Backend local data
-data/*.sqlite3
-data/*.sqlite3-shm
-data/*.sqlite3-wal
+backend/data/
+data/
 
 # Frontend
 node_modules/
 dist/
 dist-ssr/
 *.tsbuildinfo
+
 
 # Editors and OS files
 .vscode/*
@@ -54,3 +54,4 @@ Thumbs.db
 # Local scratch files
 oai_response.txt
 deploy_rsync.sh
+certs/

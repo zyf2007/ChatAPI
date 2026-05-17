@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd'
-import { DeleteOutlined, LogoutOutlined, StopOutlined } from '@ant-design/icons'
+import { DeleteOutlined, LogoutOutlined, SettingOutlined, StopOutlined } from '@ant-design/icons'
 
 import { formatTime } from '../lib/chat-format'
 import type { AuthSession, Conversation } from '../types/chat'
@@ -31,12 +31,20 @@ type ConversationSidebarProps = {
   pruneKeepCount: number
   pruneModalOpen: boolean
   pruningConversations: boolean
+  savingStreamHeartbeatConfig: boolean
   selectedConversationId: string
   setAbortPopoverConversationId: (value: string) => void
   setAbortReason: (value: string) => void
   setPruneKeepCount: (value: number) => void
   setPruneModalOpen: (value: boolean) => void
+  setStreamHeartbeatIntervalSeconds: (value: number) => void
+  setStreamHeartbeatModalOpen: (value: boolean) => void
+  setStreamHeartbeatText: (value: string) => void
+  streamHeartbeatIntervalSeconds: number
+  streamHeartbeatModalOpen: boolean
+  streamHeartbeatText: string
   onPruneConversations: () => void | Promise<void>
+  onSaveStreamHeartbeatConfig: () => void | Promise<void>
 }
 
 export function ConversationSidebar({
@@ -50,15 +58,23 @@ export function ConversationSidebar({
   onDeleteConversation,
   onLogout,
   onPruneConversations,
+  onSaveStreamHeartbeatConfig,
   onSelectConversation,
   pruneKeepCount,
   pruneModalOpen,
   pruningConversations,
+  savingStreamHeartbeatConfig,
   selectedConversationId,
   setAbortPopoverConversationId,
   setAbortReason,
   setPruneKeepCount,
   setPruneModalOpen,
+  setStreamHeartbeatIntervalSeconds,
+  setStreamHeartbeatModalOpen,
+  setStreamHeartbeatText,
+  streamHeartbeatIntervalSeconds,
+  streamHeartbeatModalOpen,
+  streamHeartbeatText,
 }: ConversationSidebarProps) {
   return (
     <div className="sidebar-inner">
@@ -200,12 +216,20 @@ export function ConversationSidebar({
         }}
       />
       <div className="sidebar-footer">
-        <Space direction="vertical" size={8} className="footer-stack">
+        <div className="footer-head">
           <Typography.Text className="footer-name">{auth.user?.username}</Typography.Text>
-          <Button icon={<LogoutOutlined />} onClick={() => void onLogout()}>
-            退出登录
-          </Button>
-        </Space>
+          <Tooltip title="流式保活设置">
+            <Button
+              type="text"
+              icon={<SettingOutlined />}
+              className="footer-settings-button"
+              onClick={() => setStreamHeartbeatModalOpen(true)}
+            />
+          </Tooltip>
+        </div>
+        <Button icon={<LogoutOutlined />} onClick={() => void onLogout()} block>
+          退出登录
+        </Button>
       </div>
       <Modal
         title="批量删除旧会话"
@@ -233,6 +257,51 @@ export function ConversationSidebar({
               onChange={(value) => setPruneKeepCount(typeof value === 'number' ? value : 0)}
               className="prune-input"
               placeholder="输入 n"
+            />
+          </div>
+        </Space>
+      </Modal>
+      <Modal
+        title="流式保活设置"
+        open={streamHeartbeatModalOpen}
+        onCancel={() => {
+          if (savingStreamHeartbeatConfig) return
+          setStreamHeartbeatModalOpen(false)
+        }}
+        onOk={() => void onSaveStreamHeartbeatConfig()}
+        okText="保存"
+        okButtonProps={{ loading: savingStreamHeartbeatConfig }}
+        cancelButtonProps={{ disabled: savingStreamHeartbeatConfig }}
+        destroyOnHidden
+      >
+        <Space direction="vertical" size={12} className="prune-modal-stack">
+          <div>
+            <Typography.Text className="prune-input-label">初始回复字段</Typography.Text>
+            <Input.TextArea
+              value={streamHeartbeatText}
+              onChange={(event) => setStreamHeartbeatText(event.target.value)}
+              autoSize={{ minRows: 4, maxRows: 10 }}
+              placeholder="可输入空格、换行或零宽度空格"
+            />
+            <div className="stream-heartbeat-actions">
+              <Button
+                size="small"
+                onClick={() => setStreamHeartbeatText('\u200B')}
+              >
+                填入零宽度空格
+              </Button>
+            </div>
+          </div>
+          <div>
+            <Typography.Text className="prune-input-label">间隔时间（秒）</Typography.Text>
+            <InputNumber
+              min={0}
+              value={streamHeartbeatIntervalSeconds}
+              onChange={(value) =>
+                setStreamHeartbeatIntervalSeconds(typeof value === 'number' ? value : 0)
+              }
+              className="prune-input"
+              placeholder="输入秒数，0 表示关闭"
             />
           </div>
         </Space>

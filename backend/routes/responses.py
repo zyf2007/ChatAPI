@@ -25,6 +25,22 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
     pending_turns = deps.pending_turns
     settings = deps.settings
     message_rate_limiter = deps.message_rate_limiter
+    config_store = deps.store
+
+    heartbeat_text_key = "stream_heartbeat_text"
+    heartbeat_interval_key = "stream_heartbeat_interval_seconds"
+
+    def get_stream_heartbeat_settings() -> dict[str, Any]:
+        raw_text = config_store.get_config(heartbeat_text_key, "")
+        raw_interval = config_store.get_config(heartbeat_interval_key, "0")
+        try:
+            interval_seconds = float(raw_interval)
+        except (TypeError, ValueError):
+            interval_seconds = 0.0
+        return {
+            "heartbeat_text": raw_text,
+            "heartbeat_interval_seconds": max(0.0, interval_seconds),
+        }
 
     def reconcile_waiting_conversations(owner: str) -> None:
         reconciler = app.extensions.get("chat_reconcile_waiting")
@@ -302,6 +318,7 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
             request_context_signature="",
             conversation_title=updated_conversation.title,
             previous_summary=updated_conversation.summary,
+            **get_stream_heartbeat_settings(),
         )
         try:
             request_debug_metadata = build_message_debug_metadata(
@@ -579,4 +596,33 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
             "conversation_id": pending.conversation_id,
             "request_id": pending.request_id,
             "draft_length": sum(len(chunk) for chunk in pending.draft_chunks),
+        }
+
+    @app.get("/api/config/stream-heartbeat")
+    @auth.require_auth
+    def get_stream_heartbeat_config():
+        return {"ok": True, **get_stream_heartbeat_settings()}
+
+    @app.post("/api/config/stream-heartbeat")
+    @auth.require_auth
+    def update_stream_heartbeat_config():
+        data = request.get_json(silent=True) or {}
+        if not isinstance(data, dict):
+            return {"error": "request body must be a JSON object"}, 400
+
+        heartbeat_text = str(data.get("heartbeat_text", ""))
+        raw_interval = data.get("heartbeat_interval_seconds", 0)
+        try:
+            interval_seconds = float(raw_interval or 0)
+        except (TypeError, ValueError):
+            return {"error": "heartbeat_interval_seconds must be a number"}, 400
+        if interval_seconds < 0:
+            return {"error": "heartbeat_interval_seconds must be greater than or equal to 0"}, 400
+
+        config_store.set_config(heartbeat_text_key, heartbeat_text)
+        config_store.set_config(heartbeat_interval_key, str(interval_seconds))
+        return {
+            "ok": True,
+            "heartbeat_text": heartbeat_text,
+            "heartbeat_interval_seconds": interval_seconds,
         }

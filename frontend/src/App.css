@@ -1,5 +1,5 @@
 .app-shell {
-  height: 100dvh;
+  height: 100svh;
   overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(59, 130, 246, 0.08), transparent 26%),
@@ -7,14 +7,14 @@
 }
 
 .boot-screen {
-  min-height: 100dvh;
+  min-height: 100svh;
   display: grid;
   place-items: center;
   background: linear-gradient(180deg, #f5f7fb 0%, #eef2f7 100%);
 }
 
 .sidebar {
-  height: 100dvh;
+  height: 100svh;
   background: #f8fafc !important;
   flex: 0 0 288px !important;
   max-width: 288px !important;
@@ -201,16 +201,34 @@
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(248, 250, 252, 0.96);
+  display: grid;
+  gap: 10px;
 }
 
 .footer-stack {
   width: 100%;
 }
 
+.footer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .footer-name {
   color: #0f172a !important;
   font-size: 13px;
   font-weight: 600;
+}
+
+.footer-settings-button {
+  color: #64748b;
+}
+
+.footer-settings-button:hover {
+  color: #1677ff !important;
+  background: rgba(22, 119, 255, 0.08) !important;
 }
 
 .prune-modal-stack {
@@ -227,10 +245,15 @@
   width: 100%;
 }
 
+.stream-heartbeat-actions {
+  margin-top: 8px;
+}
+
 .main-layout {
-  height: 100dvh;
+  height: 100svh;
   background: transparent !important;
   min-width: 0;
+  min-height: 0;
 }
 
 .header-shell {
@@ -238,17 +261,19 @@
 }
 
 .content-shell {
-  height: 100dvh;
+  height: 100svh;
   padding: 0;
   min-width: 0;
+  min-height: 0;
 }
 
 .chat-pane {
-  height: 100dvh;
+  height: 100svh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   background: rgba(255, 255, 255, 0.72);
   min-width: 0;
+  min-height: 0;
 }
 
 .chat-topbar {
@@ -285,7 +310,7 @@
 }
 
 .empty-stage {
-  min-height: 36dvh;
+  min-height: 36svh;
   display: grid;
   place-items: center;
 }
@@ -532,26 +557,48 @@
 .composer-card {
   position: sticky;
   z-index: 4;
+  bottom: 0;
   border: 0;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
   border-radius: 0;
   background: rgba(248, 250, 252, 0.96);
   backdrop-filter: blur(10px);
   transition: bottom 0.18s ease;
-  max-height: min(72dvh, 720px);
+  max-height: min(72svh, 720px);
   overflow: hidden;
 }
 
 .composer-card .ant-card-body {
-  padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+  padding: 0;
   max-height: inherit;
   overflow: hidden;
+}
+
+.composer-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: inherit;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
 }
 
 .composer-stack {
   width: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+  padding-bottom: 14px;
+}
+
+.composer-actions {
+  flex: 0 0 auto;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(248, 250, 252, 0.96);
 }
 
 .composer-mode-row {
@@ -563,6 +610,7 @@
   display: grid;
   gap: 12px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .tool-call-fields {
@@ -611,9 +659,12 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  max-height: min(40dvh, 420px);
+  max-height: min(40svh, 420px);
   overflow: auto;
   padding-right: 4px;
+  padding-bottom: 12px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .tool-form-grid::-webkit-scrollbar {
@@ -714,7 +765,7 @@
 }
 
 .login-screen {
-  min-height: 100dvh;
+  min-height: 100svh;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -807,15 +858,27 @@
   }
 
   .composer-card .ant-card-body {
-    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+    padding: 0;
   }
 
   .composer-card {
-    max-height: min(78dvh, 760px);
+    max-height: min(78svh, 760px);
   }
 
   .tool-form-grid {
-    max-height: min(36dvh, 360px);
+    max-height: min(32svh, 320px);
+  }
+
+  .composer-shell {
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .composer-stack {
+    padding-bottom: 12px;
+  }
+
+  .tool-form-grid {
+    padding-bottom: 10px;
   }
 
   .composer-textarea {

@@ -161,6 +161,14 @@ class ConversationStore:
                 ON messages(conversation_id, created_at ASC)
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
             self._ensure_column(
                 conn,
                 "conversations",
@@ -493,6 +501,31 @@ class ConversationStore:
         if refreshed is None:
             raise ValueError("conversation not found")
         return refreshed
+
+    def get_config(self, key: str, default: str = "") -> str:
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT value
+                FROM config
+                WHERE key = ?
+                """,
+                (key,),
+            ).fetchone()
+        if row is None:
+            return default
+        return str(row["value"] or "")
+
+    def set_config(self, key: str, value: str) -> None:
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO config (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
 
     def record_turn(
         self,

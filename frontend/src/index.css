@@ -23,12 +23,14 @@
 html,
 body,
 #root {
+  height: 100%;
   min-height: 100%;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  overflow: hidden;
 }
 
 a {

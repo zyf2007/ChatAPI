@@ -32,6 +32,8 @@ class PendingTurn:
     response_output_items: list[dict[str, Any]] = field(default_factory=list)
     response_output_text: str = ""
     response_metadata: dict[str, Any] = field(default_factory=dict)
+    heartbeat_text: str = ""
+    heartbeat_interval_seconds: float = 0.0
 
 
 class PendingTurnRegistry:
@@ -52,6 +54,8 @@ class PendingTurnRegistry:
         request_context_signature: str,
         conversation_title: str,
         previous_summary: str,
+        heartbeat_text: str = "",
+        heartbeat_interval_seconds: float = 0.0,
     ) -> PendingTurn:
         with self._lock:
             if conversation_id in self._by_conversation_id:
@@ -68,6 +72,8 @@ class PendingTurnRegistry:
                 conversation_title=conversation_title,
                 previous_summary=previous_summary,
                 created_at=datetime.now(timezone.utc).isoformat(),
+                heartbeat_text=heartbeat_text,
+                heartbeat_interval_seconds=max(0.0, float(heartbeat_interval_seconds or 0.0)),
             )
             self._by_request_id[pending.request_id] = pending
             self._by_conversation_id[conversation_id] = pending.request_id

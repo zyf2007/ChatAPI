@@ -364,117 +364,119 @@ export function ChatPane(props: ChatPaneProps) {
       </div>
 
       <Card className="composer-card" style={{ bottom: keyboardOffset }}>
-        <Space direction="vertical" size={12} className="composer-stack">
-          {draftBuffer && (
-            <div className="draft-banner">
-              <span>已暂存 {draftBuffer.length} 字</span>
-              <Button
-                size="small"
-                disabled={composerMode !== 'assistant_message'}
-                onClick={() => {
-                  setComposer(`${draftBuffer}${composer}`)
-                  setDraftBuffer('')
-                }}
-              >
-                继续编辑
-              </Button>
-            </div>
-          )}
-          <div className="composer-mode-row">
-            <Segmented
-              value={composerMode}
-              onChange={(value) => {
-                const nextMode = value as ComposerMode
-                setComposerMode(nextMode)
-                if (nextMode !== 'assistant_message') {
-                  setDraftBuffer('')
-                }
-              }}
-              options={[
-                { label: 'Assistant Message', value: 'assistant_message' },
-                { label: 'Tool Call', value: 'tool_call' },
-              ]}
-              disabled={sending || !isWaitingForUser}
-            />
-          </div>
-          {composerMode === 'tool_call' && (
-            <div className="tool-call-panel">
-              <div className="tool-call-fields">
-                <Select
-                  value={toolName || undefined}
-                  onChange={(value) => setToolName(value)}
-                  placeholder={availableToolSchemas.length ? '选择一个 tool' : '当前请求没有可用 schema'}
-                  options={availableToolSchemas.map((schema) => ({
-                    label: schema.name,
-                    value: schema.name,
-                    title: schema.description,
-                  }))}
-                  disabled={sending || !isWaitingForUser || availableToolSchemas.length === 0}
-                />
-                <Input
-                  value={toolCallId}
-                  onChange={(event) => setToolCallId(event.target.value)}
-                  placeholder="tool call id，可留空自动生成"
-                  disabled={sending || !isWaitingForUser}
-                />
+        <div className="composer-shell">
+          <Space direction="vertical" size={12} className="composer-stack">
+            {draftBuffer && (
+              <div className="draft-banner">
+                <span>已暂存 {draftBuffer.length} 字</span>
+                <Button
+                  size="small"
+                  disabled={composerMode !== 'assistant_message'}
+                  onClick={() => {
+                    setComposer(`${draftBuffer}${composer}`)
+                    setDraftBuffer('')
+                  }}
+                >
+                  继续编辑
+                </Button>
               </div>
-              {selectedToolSchema && (
-                <div className="tool-schema-summary">
-                  <div className="tool-schema-header">
-                    <span className="tool-schema-name">{selectedToolSchema.name}</span>
-                    <span className="tool-schema-badge">{toolFields.length} fields</span>
-                  </div>
-                  {selectedToolSchema.description ? (
-                    <Typography.Text className="tool-schema-description">
-                      {selectedToolSchema.description}
-                    </Typography.Text>
-                  ) : null}
-                </div>
-              )}
-              {selectedToolSchema ? (
-                <div className="tool-form-grid">
-                  {toolFields.length ? (
-                    toolFields.map(([fieldName, schema]) => (
-                      <ToolField
-                        key={fieldName}
-                        disabled={sending || !isWaitingForUser}
-                        fieldName={fieldName}
-                        onChange={(nextField, nextValue) =>
-                          setToolFormValues((prev) => ({
-                            ...prev,
-                            [nextField]: nextValue,
-                          }))
-                        }
-                        required={(selectedToolSchema.parameters.required ?? []).includes(fieldName)}
-                        schema={schema}
-                        value={toolFormValues[fieldName]}
-                      />
-                    ))
-                  ) : (
-                    <div className="tool-form-empty">当前 tool 没有参数，直接点击发送即可。</div>
-                  )}
-                </div>
-              ) : (
-                <div className="tool-form-empty">当前消息里没有可解析的 tool schema。</div>
-              )}
+            )}
+            <div className="composer-mode-row">
+              <Segmented
+                value={composerMode}
+                onChange={(value) => {
+                  const nextMode = value as ComposerMode
+                  setComposerMode(nextMode)
+                  if (nextMode !== 'assistant_message') {
+                    setDraftBuffer('')
+                  }
+                }}
+                options={[
+                  { label: 'Assistant Message', value: 'assistant_message' },
+                  { label: 'Tool Call', value: 'tool_call' },
+                ]}
+                disabled={sending || !isWaitingForUser}
+              />
             </div>
-          )}
-          {composerMode === 'assistant_message' && (
-            <TextArea
-              value={composer}
-              onChange={(event) => setComposer(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              placeholder={
-                isWaitingForUser
-                  ? '输入你作为 assistant 的回复。点“暂存”会把当前内容累积到这轮回复里，点“发送”会结束这一轮。'
-                  : '当前没有等待中的 user 请求。'
-              }
-              autoSize={{ minRows: 4, maxRows: 10 }}
-              className="composer-textarea"
-              disabled={sending || !isWaitingForUser}
-            />
-          )}
-          <Flex justify="space-between" align="center" gap={12} wrap>
+            {composerMode === 'tool_call' && (
+              <div className="tool-call-panel">
+                <div className="tool-call-fields">
+                  <Select
+                    value={toolName || undefined}
+                    onChange={(value) => setToolName(value)}
+                    placeholder={availableToolSchemas.length ? '选择一个 tool' : '当前请求没有可用 schema'}
+                    options={availableToolSchemas.map((schema) => ({
+                      label: schema.name,
+                      value: schema.name,
+                      title: schema.description,
+                    }))}
+                    disabled={sending || !isWaitingForUser || availableToolSchemas.length === 0}
+                  />
+                  <Input
+                    value={toolCallId}
+                    onChange={(event) => setToolCallId(event.target.value)}
+                    placeholder="tool call id，可留空自动生成"
+                    disabled={sending || !isWaitingForUser}
+                  />
+                </div>
+                {selectedToolSchema && (
+                  <div className="tool-schema-summary">
+                    <div className="tool-schema-header">
+                      <span className="tool-schema-name">{selectedToolSchema.name}</span>
+                      <span className="tool-schema-badge">{toolFields.length} fields</span>
+                    </div>
+                    {selectedToolSchema.description ? (
+                      <Typography.Text className="tool-schema-description">
+                        {selectedToolSchema.description}
+                      </Typography.Text>
+                    ) : null}
+                  </div>
+                )}
+                {selectedToolSchema ? (
+                  <div className="tool-form-grid">
+                    {toolFields.length ? (
+                      toolFields.map(([fieldName, schema]) => (
+                        <ToolField
+                          key={fieldName}
+                          disabled={sending || !isWaitingForUser}
+                          fieldName={fieldName}
+                          onChange={(nextField, nextValue) =>
+                            setToolFormValues((prev) => ({
+                              ...prev,
+                              [nextField]: nextValue,
+                            }))
+                          }
+                          required={(selectedToolSchema.parameters.required ?? []).includes(fieldName)}
+                          schema={schema}
+                          value={toolFormValues[fieldName]}
+                        />
+                      ))
+                    ) : (
+                      <div className="tool-form-empty">当前 tool 没有参数，直接点击发送即可。</div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="tool-form-empty">当前消息里没有可解析的 tool schema。</div>
+                )}
+              </div>
+            )}
+            {composerMode === 'assistant_message' && (
+              <TextArea
+                value={composer}
+                onChange={(event) => setComposer(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
+                placeholder={
+                  isWaitingForUser
+                    ? '输入你作为 assistant 的回复。点“暂存”会把当前内容累积到这轮回复里，点“发送”会结束这一轮。'
+                    : '当前没有等待中的 user 请求。'
+                }
+                autoSize={{ minRows: 4, maxRows: 10 }}
+                className="composer-textarea"
+                disabled={sending || !isWaitingForUser}
+              />
+            )}
+          </Space>
+          <Flex justify="space-between" align="center" gap={12} wrap className="composer-actions">
             <Typography.Text className="composer-hint">
               {isWaitingForUser
                 ? composerMode === 'assistant_message'
@@ -512,7 +514,7 @@ export function ChatPane(props: ChatPaneProps) {
               </Button>
             </Space>
           </Flex>
-        </Space>
+        </div>
       </Card>
     </div>
   )

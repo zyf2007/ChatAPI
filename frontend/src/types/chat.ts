@@ -88,3 +88,8 @@ export type LoginFormValues = {
   username: string
   password: string
 }
+
+export type StreamHeartbeatConfig = {
+  heartbeat_text: string
+  heartbeat_interval_seconds: number
+}
