@@ -12,8 +12,15 @@ ChatAPI lets AI clients (agents, chatbots) call a human operator via an OpenAI R
 
 ```bash
 cd backend
-uv sync          # install dependencies
-uv run main.py   # start the Flask dev server (default: http://0.0.0.0:5000)
+uv sync                  # install dependencies
+uv run main.py           # start the Flask dev server (default: http://0.0.0.0:5001)
+uv run pytest tests/ -v  # run unit tests
+```
+
+### One-click startup
+
+```bash
+./start.sh  # starts backend (5001) + frontend (5173) together; Ctrl+C stops both
 ```
 
 ### Frontend
@@ -38,6 +45,8 @@ Required variables: `CHATAPI_USERNAME`, `CHATAPI_PASSWORD`, `CHATAPI_SESSION_SEC
 
 Config is loaded from `<repo_root>/.env` and `<repo_root>/backend/.env` (both are checked; env vars already set in the shell take precedence).
 
+> **macOS note**: Port 5000 is occupied by AirPlay Receiver. Backend uses 5001; Vite proxy target is also 5001.
+
 ## Architecture
 
 ### Request flow
@@ -58,8 +67,12 @@ The draft/streaming path uses `POST /api/chat/draft` to send incremental text ch
 | Pending turns | `backend/services/pending.py` | `PendingTurnRegistry` — in-memory registry of active requests waiting for a human reply |
 | SSE streaming | `backend/services/response_stream.py` | Generates OpenAI Responses-format SSE events; detects client disconnect via socket peek |
 | Routes | `backend/routes/responses.py` | `/v1/responses`, `/api/chat/send`, `/api/chat/draft`, stream heartbeat config |
+| Routes | `backend/routes/chat_completions.py` | `POST /v1/chat/completions` — OpenAI Chat Completions style |
+| Routes | `backend/routes/anthropic.py` | `POST /v1/messages` — Anthropic Messages style |
 | Routes | `backend/routes/conversations.py` | CRUD for conversations; prune endpoint |
 | Routes | `backend/routes/auth.py` | Login / logout / session check |
+| Parsers | `backend/services/chat_parsers.py` | Pure parsing functions shared by the three API routes |
+| Tests | `backend/tests/` | pytest unit tests; import as `backend.services.xxx` (pythonpath = "..") |
 
 ### Database (SQLite)
 
@@ -77,3 +90,7 @@ Frontend calls backend at `/api/*` and `/v1/*`. The Vite dev proxy is configured
 - Client disconnect is detected by peeking the werkzeug socket (`MSG_PEEK`) — if `recv` returns `b""` the connection is gone and the pending turn is discarded with `realtime_status: aborted`.
 - The `heartbeat` feature sends periodic filler text deltas while the human is composing, to keep SSE connections alive through proxies with short timeouts. Configured via `POST /api/config/stream-heartbeat` and persisted in the `config` table.
 - Response mode can be `assistant_message` (plain text) or `tool_call` (returns a `function_call` output item). The frontend composer switches between these modes.
+- All three API routes must store `request.tools` into `message.metadata.request_debug.tool_schemas` — the frontend reads this to populate the Tool Call dropdown (`getLastToolSchemas` in `chat-format.tsx`).
+- Anthropic tool definitions use `input_schema` (not `parameters`). Frontend `toToolSchemaOption` handles both via `parameters ?? input_schema`.
+- `@auth.require_auth` returns generic `{"error":"unauthorized"}` — unsuitable for `/v1/messages` which must return Anthropic-format errors. That route does manual auth checking instead.
+- Upstream repository: `zyf2007/ChatAPI`. PRs go there from `Dream-XJ:main`.
