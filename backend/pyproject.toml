@@ -5,9 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.102.0",
     "flask>=3.1.0",
     "flask-cors>=6.0.2",
-    "openai>=2.37.0",
     "python-dotenv>=1.2.2",
 ]

@@ -13,6 +13,7 @@ from .stream_common import (
     client_disconnected,
     discard_pending_turn,
     sse_data,
+    sse_event,
 )
 
 
@@ -29,8 +30,12 @@ def stream_anthropic_turn(
     def generate():
         sent_text = ""
         block_started = False
+        def emit(payload: dict[str, Any]) -> str:
+            event_name = str(payload.get("type") or "message")
+            return sse_event(event_name, payload)
+
         try:
-            yield sse_data(
+            yield emit(
                 {
                     "type": "message_start",
                     "message": {
@@ -46,7 +51,7 @@ def stream_anthropic_turn(
                     },
                 }
             )
-            yield sse_data(
+            yield emit(
                 {
                     "type": "content_block_start",
                     "index": 0,
@@ -62,7 +67,7 @@ def stream_anthropic_turn(
 
                 for piece in pending_turns.consume_draft_chunks(pending.request_id):
                     sent_text += piece
-                    yield sse_data(
+                    yield emit(
                         {
                             "type": "content_block_delta",
                             "index": 0,
@@ -79,14 +84,14 @@ def stream_anthropic_turn(
                         error_body, _ = build_abort_error(
                             finalized.abort_message or "request aborted"
                         )
-                        yield sse_data({"type": "error", "error": error_body["error"]})
+                        yield emit({"type": "error", "error": error_body["error"]})
                         return
                     usage = estimate_usage(finalized.input_text, finalized.assistant_text)
                     if finalized.response_mode == "tool_call":
                         if block_started:
-                            yield sse_data({"type": "content_block_stop", "index": 0})
+                            yield emit({"type": "content_block_stop", "index": 0})
                         metadata = finalized.response_output_items[0] if finalized.response_output_items else {}
-                        yield sse_data(
+                        yield emit(
                             {
                                 "type": "content_block_start",
                                 "index": 1,
@@ -98,7 +103,7 @@ def stream_anthropic_turn(
                                 },
                             }
                         )
-                        yield sse_data(
+                        yield emit(
                             {
                                 "type": "content_block_delta",
                                 "index": 1,
@@ -108,14 +113,14 @@ def stream_anthropic_turn(
                                 },
                             }
                         )
-                        yield sse_data({"type": "content_block_stop", "index": 1})
+                        yield emit({"type": "content_block_stop", "index": 1})
                         stop_reason = "tool_use"
                     else:
                         remaining = finalized.assistant_text
                         if remaining.startswith(sent_text):
                             remaining = remaining[len(sent_text):]
                         if remaining:
-                            yield sse_data(
+                            yield emit(
                                 {
                                     "type": "content_block_delta",
                                     "index": 0,
@@ -125,9 +130,9 @@ def stream_anthropic_turn(
                                     },
                                 }
                             )
-                        yield sse_data({"type": "content_block_stop", "index": 0})
+                        yield emit({"type": "content_block_stop", "index": 0})
                         stop_reason = "end_turn"
-                    yield sse_data(
+                    yield emit(
                         {
                             "type": "message_delta",
                             "delta": {
@@ -142,7 +147,7 @@ def stream_anthropic_turn(
                             },
                         }
                     )
-                    yield sse_data({"type": "message_stop"})
+                    yield emit({"type": "message_stop"})
                     return
 
                 pending.stream_event.wait(0.5)

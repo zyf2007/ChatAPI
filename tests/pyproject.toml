@@ -1,0 +1,12 @@
+[project]
+name = "tests"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "anthropic>=0.102.0",
+    "httpx>=0.28.1",
+    "openai>=2.37.0",
+    "socksio>=1.0.0",
+]
