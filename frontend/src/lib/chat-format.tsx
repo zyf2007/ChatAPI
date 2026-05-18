@@ -49,10 +49,10 @@ function toToolSchemaOption(schema: unknown): ToolSchemaOption | null {
 
   const description =
     typeof functionRecord.description === 'string' ? functionRecord.description : ''
+  const rawParameters = functionRecord.parameters ?? functionRecord.input_schema
   const parameters =
-    functionRecord.parameters &&
-    typeof functionRecord.parameters === 'object'
-      ? (functionRecord.parameters as JsonSchema)
+    rawParameters && typeof rawParameters === 'object'
+      ? (rawParameters as JsonSchema)
       : { type: 'object', properties: {} }
 
   return {

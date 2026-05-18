@@ -239,6 +239,7 @@ def register_chat_completions_routes(app: Flask, *, deps: AppDependencies) -> No
         )
 
         try:
+            raw_tools = data.get("tools")
             store.add_message(
                 conversation.id,
                 "user",
@@ -253,6 +254,7 @@ def register_chat_completions_routes(app: Flask, *, deps: AppDependencies) -> No
                         "request_id": pending.request_id,
                         "model": model,
                         "input_text": context_text,
+                        "tool_schemas": raw_tools if isinstance(raw_tools, list) else [],
                         "headers": auth.request_headers_snapshot(),
                     },
                 },
