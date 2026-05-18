@@ -29,11 +29,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         [joinBasePath(basePath, '/api')]: {
-          target: 'http://127.0.0.1:5000',
+          target: 'http://127.0.0.1:5001',
           changeOrigin: true,
         },
         [joinBasePath(basePath, '/v1')]: {
-          target: 'http://127.0.0.1:5000',
+          target: 'http://127.0.0.1:5001',
           changeOrigin: true,
         },
       },

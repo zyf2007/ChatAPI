@@ -189,6 +189,13 @@ export function ChatPane(props: ChatPaneProps) {
 
   const toolFields = Object.entries(selectedToolSchema?.parameters.properties ?? {})
 
+  const providerLabel = (() => {
+    const provider = visibleMessages.find(m => m.role === 'user')?.metadata?.provider
+    if (provider === 'chat_completions') return 'OpenAI Chat Completions'
+    if (provider === 'anthropic') return 'Anthropic Messages'
+    return 'OpenAI Responses'
+  })()
+
   return (
     <div className="chat-pane">
       <div className="chat-topbar">
@@ -197,7 +204,7 @@ export function ChatPane(props: ChatPaneProps) {
             <Button icon={<MenuOutlined />} onClick={onOpenDrawer} className="menu-button" />
           )}
           <div>
-            <Typography.Text className="eyebrow">OpenAI Responses</Typography.Text>
+            <Typography.Text className="eyebrow">{providerLabel}</Typography.Text>
             <Typography.Title level={3} className="chat-title">
               {selectedConversationTitle || '选择一个会话'}
             </Typography.Title>

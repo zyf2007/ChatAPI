@@ -9,3 +9,11 @@ dependencies = [
     "flask-cors>=6.0.2",
     "python-dotenv>=1.2.2",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".."]

@@ -8,7 +8,9 @@ from .repositories import ConversationStore
 from .services import MessageRateLimiter, PendingTurnRegistry
 from .routes import (
     register_auth_routes,
+    register_chat_completions_routes,
     register_conversation_routes,
+    register_messages_routes,
     register_response_routes,
 )
 
@@ -40,5 +42,7 @@ def create_app() -> Flask:
     register_auth_routes(app, auth=auth, settings=settings)
     register_conversation_routes(app, deps=deps)
     register_response_routes(app, deps=deps)
+    register_chat_completions_routes(app, deps=deps)
+    register_messages_routes(app, deps=deps)
 
     return app
