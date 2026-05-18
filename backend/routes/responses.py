@@ -15,7 +15,19 @@ from ..services.turn_coordinator import PreparedTurn, TurnCoordinator
 
 def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
     auth = deps.auth
-    coordinator = TurnCoordinator(deps, extensions=app.extensions, logger=app.logger)
+    realtime = app.extensions.get("chat_realtime")
+
+    def publish_sync(owner_id: str, conversation_id: str | None = None) -> None:
+        if realtime is None or not conversation_id:
+            return
+        realtime.publish_conversation_upsert(owner_id, conversation_id)
+
+    coordinator = TurnCoordinator(
+        deps,
+        extensions=app.extensions,
+        logger=app.logger,
+        publish_sync=publish_sync,
+    )
 
     def handle_protocol_request(data: dict[str, object], request_format: str):
         prepared = coordinator.prepare_pending_turn(data, request_format)
@@ -32,6 +44,7 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                 "store": deps.store,
                 "build_abort_error": coordinator.build_abort_error,
                 "client_socket": request.environ.get("werkzeug.socket"),
+                "publish_sync": publish_sync,
             }
             if request_format == "chat_completions":
                 return stream_chat_completion_turn(**stream_kwargs)
@@ -50,7 +63,12 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                     return jsonify(body), status
                 return jsonify(coordinator.finalize_pending_turn(waited))
             if client_disconnected(client_socket):
-                discard_pending_turn(pending, pending_turns=deps.pending_turns, store=deps.store)
+                discard_pending_turn(
+                    pending,
+                    pending_turns=deps.pending_turns,
+                    store=deps.store,
+                    publish_sync=publish_sync,
+                )
                 body, status = coordinator.build_not_found_error(
                     "client disconnected",
                     code="client_disconnected",

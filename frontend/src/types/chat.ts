@@ -114,3 +114,31 @@ export type AutomationRule = {
     error_message: string
   }
 }
+
+export type StatisticsSummary = {
+  total_requests: number
+  average_request_time_seconds: number
+  average_tpm: number
+  total_tokens: number
+  input_tokens: number
+  output_tokens: number
+  start_at?: string | null
+  end_at?: string | null
+}
+
+export type WorkspaceSnapshotEvent = {
+  type: 'snapshot'
+  conversations: Conversation[]
+  messages_by_conversation: Record<string, MessageItem[]>
+}
+
+export type WorkspaceConversationUpsertEvent = {
+  type: 'conversation_upsert'
+  conversation: Conversation
+  messages: MessageItem[]
+}
+
+export type WorkspaceConversationDeleteEvent = {
+  type: 'conversation_delete'
+  conversation_id: string
+}

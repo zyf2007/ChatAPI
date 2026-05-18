@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 
-import { requestJson } from '../lib/api'
+import { requestJson, resolveWebSocketUrl } from '../lib/api'
 import {
   buildInitialToolFormValues,
   getLastToolSchemas,
@@ -18,6 +18,9 @@ import type {
   ResponsesPayload,
   ToolFieldValue,
   VisibleMessage,
+  WorkspaceConversationDeleteEvent,
+  WorkspaceConversationUpsertEvent,
+  WorkspaceSnapshotEvent,
 } from '../types/chat'
 
 const STORAGE_KEY = 'chatapi.conversationId'
@@ -31,7 +34,8 @@ export function useChatWorkspace(isMobile: boolean) {
   const [loginLoading, setLoginLoading] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversationId, setSelectedConversationId] = useState('')
-  const [messages, setMessages] = useState<MessageItem[]>([])
+  const [messagesByConversation, setMessagesByConversation] = useState<Record<string, MessageItem[]>>({})
+  const [messagesLoading, setMessagesLoading] = useState(true)
   const [composer, setComposer] = useState('')
   const [composerMode, setComposerMode] = useState<ComposerMode>('assistant_message')
   const [toolName, setToolName] = useState('')
@@ -57,10 +61,14 @@ export function useChatWorkspace(isMobile: boolean) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const shouldStickToBottomRef = useRef(true)
   const previousConversationIdRef = useRef('')
+  const conversationsRef = useRef<Conversation[]>([])
+  const selectedConversationIdRef = useRef('')
+  const socketRef = useRef<WebSocket | null>(null)
 
   const selectedConversation = conversations.find(
     (item) => item.id === selectedConversationId,
   )
+  const messages = messagesByConversation[selectedConversationId] ?? []
   const hasLocalDraftBuffer =
     !!selectedConversationId &&
     Object.prototype.hasOwnProperty.call(draftBuffers, selectedConversationId)
@@ -97,6 +105,43 @@ export function useChatWorkspace(isMobile: boolean) {
     })
   }
 
+  function sortConversations(items: Conversation[]) {
+    return [...items].sort((left, right) => {
+      return Date.parse(right.updated_at) - Date.parse(left.updated_at)
+    })
+  }
+
+  function resolvePreferredConversationId(items: Conversation[]) {
+    const requested =
+      selectedConversationIdRef.current ||
+      localStorage.getItem(STORAGE_KEY) ||
+      ''
+    if (requested && items.some((item) => item.id === requested)) {
+      return requested
+    }
+    return items[0]?.id ?? ''
+  }
+
+  function applySelectedConversation(nextConversationId: string) {
+    selectedConversationIdRef.current = nextConversationId
+    setSelectedConversationId((current) =>
+      current === nextConversationId ? current : nextConversationId,
+    )
+    if (nextConversationId) {
+      localStorage.setItem(STORAGE_KEY, nextConversationId)
+    } else {
+      localStorage.removeItem(STORAGE_KEY)
+    }
+  }
+
+  useEffect(() => {
+    conversationsRef.current = conversations
+  }, [conversations])
+
+  useEffect(() => {
+    selectedConversationIdRef.current = selectedConversationId
+  }, [selectedConversationId])
+
   useEffect(() => {
     let active = true
 
@@ -108,7 +153,6 @@ export function useChatWorkspace(isMobile: boolean) {
         setAuth(session)
         if (session.authenticated) {
           await loadAutomationRules()
-          await loadConversations()
         }
       } catch (error) {
         if (active) {
@@ -171,11 +215,6 @@ export function useChatWorkspace(isMobile: boolean) {
   }, [selectedConversationId, messages, draftBuffer, sending])
 
   useEffect(() => {
-    if (!auth.authenticated || !selectedConversationId) return
-    void loadMessages(selectedConversationId)
-  }, [auth.authenticated, selectedConversationId])
-
-  useEffect(() => {
     if (composerMode !== 'tool_call') return
     if (toolName && selectedToolSchema) return
     if (availableToolSchemas[0]?.name) {
@@ -189,14 +228,101 @@ export function useChatWorkspace(isMobile: boolean) {
 
   useEffect(() => {
     if (!auth.authenticated) return
-    const timer = window.setInterval(() => {
-      void loadConversations()
-      if (selectedConversationId) {
-        void loadMessages(selectedConversationId)
-      }
-    }, 1500)
-    return () => window.clearInterval(timer)
-  }, [auth.authenticated, selectedConversationId])
+    let active = true
+    let reconnectTimer = 0
+
+    function connect() {
+      const socket = new WebSocket(resolveWebSocketUrl('/api/ws'))
+      socketRef.current = socket
+
+      socket.addEventListener('message', (event) => {
+        if (!active) return
+        let payload:
+          | WorkspaceSnapshotEvent
+          | WorkspaceConversationUpsertEvent
+          | WorkspaceConversationDeleteEvent
+          | { type: 'ping' }
+        try {
+          payload = JSON.parse(event.data) as
+            | WorkspaceSnapshotEvent
+            | WorkspaceConversationUpsertEvent
+            | WorkspaceConversationDeleteEvent
+            | { type: 'ping' }
+        } catch {
+          return
+        }
+        if (payload.type === 'ping') {
+          return
+        }
+
+        if (payload.type === 'snapshot') {
+          const nextConversations = sortConversations(payload.conversations)
+          setConversations(nextConversations)
+          setMessagesByConversation(payload.messages_by_conversation)
+          setMessagesLoading(false)
+          applySelectedConversation(resolvePreferredConversationId(nextConversations))
+          return
+        }
+
+        if (payload.type === 'conversation_upsert') {
+          const remaining = conversationsRef.current.filter(
+            (item) => item.id !== payload.conversation.id,
+          )
+          const nextConversations = sortConversations([
+            payload.conversation,
+            ...remaining,
+          ])
+          conversationsRef.current = nextConversations
+          setConversations(nextConversations)
+          applySelectedConversation(resolvePreferredConversationId(nextConversations))
+          setMessagesByConversation((current) => ({
+            ...current,
+            [payload.conversation.id]: payload.messages,
+          }))
+          return
+        }
+
+        const nextConversations = conversationsRef.current.filter(
+          (item) => item.id !== payload.conversation_id,
+        )
+        conversationsRef.current = nextConversations
+        setConversations(nextConversations)
+        applySelectedConversation(resolvePreferredConversationId(nextConversations))
+        setMessagesByConversation((current) => {
+          if (!Object.prototype.hasOwnProperty.call(current, payload.conversation_id)) {
+            return current
+          }
+          const next = { ...current }
+          delete next[payload.conversation_id]
+          return next
+        })
+      })
+
+      socket.addEventListener('close', () => {
+        if (!active) return
+        if (socketRef.current === socket) {
+          socketRef.current = null
+        }
+        setMessagesLoading(true)
+        reconnectTimer = window.setTimeout(() => {
+          connect()
+        }, 1000)
+      })
+
+      socket.addEventListener('error', () => {
+        socket.close()
+      })
+    }
+
+    connect()
+
+    return () => {
+      active = false
+      window.clearTimeout(reconnectTimer)
+      socketRef.current?.close()
+      socketRef.current = null
+    }
+  }, [auth.authenticated])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.visualViewport) {
@@ -223,48 +349,6 @@ export function useChatWorkspace(isMobile: boolean) {
     }
   }, [])
 
-  async function loadConversations(nextSelectedId?: string) {
-    const data = await requestJson<{ items: Conversation[] }>('/api/conversations')
-    setConversations(data.items)
-    const requested =
-      nextSelectedId ??
-      selectedConversationId ??
-      localStorage.getItem(STORAGE_KEY) ??
-      ''
-    const preferred = data.items.some((item) => item.id === requested)
-      ? requested
-      : data.items[0]?.id ?? ''
-
-    if (!preferred) {
-      if (selectedConversationId) {
-        setSelectedConversationId('')
-      }
-      setMessages([])
-      localStorage.removeItem(STORAGE_KEY)
-      return
-    }
-
-    if (preferred !== selectedConversationId) {
-      setSelectedConversationId(preferred)
-      localStorage.setItem(STORAGE_KEY, preferred)
-    }
-  }
-
-  async function loadMessages(conversationId: string) {
-    try {
-      const data = await requestJson<{ items: MessageItem[] }>(
-        `/api/conversations/${conversationId}/messages`,
-      )
-      setMessages(data.items)
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('not found')) {
-        setMessages([])
-        return
-      }
-      message.error(error instanceof Error ? error.message : '加载消息失败')
-    }
-  }
-
   async function handleLogin(values: { username: string; password: string }) {
     setLoginLoading(true)
     try {
@@ -275,7 +359,6 @@ export function useChatWorkspace(isMobile: boolean) {
       const session = await requestJson<AuthSession>('/api/auth/session')
       setAuth(session)
       await loadAutomationRules()
-      await loadConversations()
       message.success('登录成功')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '登录失败')
@@ -291,7 +374,8 @@ export function useChatWorkspace(isMobile: boolean) {
       setAuth({ authenticated: false, user: null })
       setConversations([])
       setSelectedConversationId('')
-      setMessages([])
+      setMessagesByConversation({})
+      setMessagesLoading(false)
       setComposer('')
       setComposerMode('assistant_message')
       setToolName('')
@@ -440,9 +524,13 @@ export function useChatWorkspace(isMobile: boolean) {
   }
 
   async function handleSelectConversation(conversationId: string) {
+    if (conversationId === selectedConversationId) {
+      if (isMobile) setDrawerOpen(false)
+      return
+    }
     setSelectedConversationId(conversationId)
+    selectedConversationIdRef.current = conversationId
     localStorage.setItem(STORAGE_KEY, conversationId)
-    await loadMessages(conversationId)
     if (isMobile) setDrawerOpen(false)
     setComposerMode('assistant_message')
     setToolName('')
@@ -462,22 +550,6 @@ export function useChatWorkspace(isMobile: boolean) {
       await requestJson(`/api/conversations/${conversationId}`, {
         method: 'DELETE',
       })
-
-      const remaining = conversations.filter((item) => item.id !== conversationId)
-      const nextConversationId =
-        conversationId === selectedConversationId ? remaining[0]?.id ?? '' : selectedConversationId
-
-      if (!nextConversationId) {
-        setSelectedConversationId('')
-        setMessages([])
-        localStorage.removeItem(STORAGE_KEY)
-      } else if (nextConversationId !== selectedConversationId) {
-        setSelectedConversationId(nextConversationId)
-        localStorage.setItem(STORAGE_KEY, nextConversationId)
-        await loadMessages(nextConversationId)
-      }
-
-      await loadConversations(nextConversationId)
       message.success('会话已删除')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '删除会话失败')
@@ -506,7 +578,6 @@ export function useChatWorkspace(isMobile: boolean) {
       })
 
       setPruneModalOpen(false)
-      await loadConversations(selectedConversationId)
 
       if (response.skipped_count > 0) {
         message.success(
@@ -537,10 +608,6 @@ export function useChatWorkspace(isMobile: boolean) {
       })
       setAbortPopoverConversationId('')
       setAbortReason('')
-      await loadConversations(selectedConversationId)
-      if (conversationId === selectedConversationId) {
-        await loadMessages(conversationId)
-      }
       message.success('已 abort 该请求')
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Abort 失败')
@@ -635,8 +702,7 @@ export function useChatWorkspace(isMobile: boolean) {
       })
       const nextConversationId = response.conversation?.id ?? selectedConversationId
       if (nextConversationId) {
-        setSelectedConversationId(nextConversationId)
-        localStorage.setItem(STORAGE_KEY, nextConversationId)
+        applySelectedConversation(nextConversationId)
       }
       setComposer('')
       if (options?.resetMode !== false) {
@@ -645,10 +711,6 @@ export function useChatWorkspace(isMobile: boolean) {
       setToolName('')
       setToolCallId('')
       setToolFormValues({})
-      await loadConversations(nextConversationId)
-      if (nextConversationId) {
-        await loadMessages(nextConversationId)
-      }
       message.success(options?.successMessage || '已结束输出')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '发送失败')
@@ -707,6 +769,7 @@ export function useChatWorkspace(isMobile: boolean) {
     keyboardOffset,
     loginLoading,
     messages,
+    messagesLoading,
     pruneKeepCount,
     pruneModalOpen,
     pruningConversations,

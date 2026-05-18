@@ -26,3 +26,10 @@ export async function requestJson<T>(url: string, init?: RequestInit): Promise<T
   }
   return body as T
 }
+
+export function resolveWebSocketUrl(url: string): string {
+  const resolved = resolveRequestUrl(url)
+  const target = new URL(resolved, window.location.origin)
+  target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:'
+  return target.toString()
+}

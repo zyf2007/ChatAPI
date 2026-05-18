@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from ..repositories import ConversationStore
 from .pending import PendingTurnRegistry
@@ -9,9 +9,16 @@ from .turn_protocols import build_protocol_response_id, normalize_message_text
 
 
 class TurnOutputController:
-    def __init__(self, *, store: ConversationStore, pending_turns: PendingTurnRegistry):
+    def __init__(
+        self,
+        *,
+        store: ConversationStore,
+        pending_turns: PendingTurnRegistry,
+        publish_sync: Callable[[str, str | None], None] | None = None,
+    ):
         self._store = store
         self._pending_turns = pending_turns
+        self._publish_sync = publish_sync
 
     def add_text_delta(
         self,
@@ -36,6 +43,7 @@ class TurnOutputController:
                     "realtime_draft_text": pending.draft_text,
                 },
             )
+            self._notify(owner_id, conversation_id)
         return pending
 
     def complete_assistant_message(
@@ -79,6 +87,7 @@ class TurnOutputController:
                 "realtime_draft_text": "",
             },
         )
+        self._notify(owner_id, conversation_id)
         resolved = self._pending_turns.resolve(
             conversation_id=conversation_id,
             owner_id=owner_id,
@@ -140,6 +149,7 @@ class TurnOutputController:
                 "realtime_draft_text": "",
             },
         )
+        self._notify(owner_id, conversation_id)
         resolved = self._pending_turns.resolve(
             conversation_id=conversation_id,
             owner_id=owner_id,
@@ -169,3 +179,8 @@ class TurnOutputController:
         if pending is None or pending.owner_id != owner_id:
             raise ValueError("conversation is not waiting for a reply")
         return pending
+
+    def _notify(self, owner_id: str, conversation_id: str) -> None:
+        if self._publish_sync is None:
+            return
+        self._publish_sync(owner_id, conversation_id)

@@ -20,7 +20,19 @@ function App() {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
   })
   const [sidebarWidth, setSidebarWidth] = useState(320)
+  const sidebarElementRef = useRef<HTMLDivElement | null>(null)
   const sidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const liveSidebarWidthRef = useRef(sidebarWidth)
+
+  function applySidebarWidth(width: number) {
+    const sidebarElement = sidebarElementRef.current
+    if (!sidebarElement) return
+    const nextWidth = `${width}px`
+    sidebarElement.style.width = nextWidth
+    sidebarElement.style.minWidth = nextWidth
+    sidebarElement.style.maxWidth = nextWidth
+    sidebarElement.style.flex = `0 0 ${nextWidth}`
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -33,16 +45,28 @@ function App() {
   }, [])
 
   useEffect(() => {
+    liveSidebarWidthRef.current = sidebarWidth
+  }, [sidebarWidth])
+
+  useEffect(() => {
     if (isMobile) return
 
     function handlePointerMove(event: PointerEvent) {
       const current = sidebarResizeRef.current
       if (!current) return
       const nextWidth = Math.min(480, Math.max(220, current.startWidth + event.clientX - current.startX))
-      setSidebarWidth(nextWidth)
+      liveSidebarWidthRef.current = nextWidth
+      applySidebarWidth(nextWidth)
     }
 
     function handlePointerUp() {
+      const current = sidebarResizeRef.current
+      if (current) {
+        setSidebarWidth((previous) => {
+          const nextWidth = liveSidebarWidthRef.current
+          return previous === nextWidth ? previous : nextWidth
+        })
+      }
       sidebarResizeRef.current = null
       document.body.classList.remove('is-resizing-sidebar')
     }
@@ -64,6 +88,11 @@ function App() {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth))
   }, [sidebarWidth])
+
+  useEffect(() => {
+    if (isMobile) return
+    applySidebarWidth(sidebarCollapsed ? 72 : sidebarWidth)
+  }, [isMobile, sidebarCollapsed, sidebarWidth])
 
   if (workspace.booting) {
     return (
@@ -125,17 +154,19 @@ function App() {
     <AntApp>
       <Layout className="app-shell">
         {!isMobile && (
-          <div
-            className={`sidebar-shell ${sidebarCollapsed ? 'collapsed' : ''}`}
+          <Sider
+            ref={sidebarElementRef}
+            className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}
+            width={sidebarCollapsed ? 72 : sidebarWidth}
+            collapsedWidth={72}
             style={{ width: sidebarCollapsed ? 72 : sidebarWidth }}
           >
-            <Sider className="sidebar" width={sidebarCollapsed ? 72 : sidebarWidth}>
-              {sidebar}
-            </Sider>
+            {sidebar}
             {!sidebarCollapsed ? (
               <div
                 className="sidebar-resizer"
                 onPointerDown={(event) => {
+                  event.preventDefault()
                   sidebarResizeRef.current = {
                     startX: event.clientX,
                     startWidth: sidebarWidth,
@@ -144,7 +175,7 @@ function App() {
                 }}
               />
             ) : null}
-          </div>
+          </Sider>
         )}
         <Layout className="main-layout">
           <Header className="header-shell">
@@ -163,6 +194,7 @@ function App() {
               isMobile={isMobile}
               isWaitingForUser={workspace.isWaitingForUser}
               keyboardOffset={workspace.keyboardOffset}
+              messagesLoading={workspace.messagesLoading}
               onDraft={workspace.handleDraft}
               onLogout={workspace.handleLogout}
               onOpenDrawer={() => workspace.setDrawerOpen(true)}

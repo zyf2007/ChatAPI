@@ -36,6 +36,37 @@ def _json_load(raw: str | None, default: Any) -> Any:
         return default
 
 
+def _estimate_tokens(text: str) -> int:
+    text = text.strip()
+    if not text:
+        return 0
+    ascii_tokens = len(text.split())
+    cjk_chars = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    return max(ascii_tokens, 1) + cjk_chars // 2
+
+
+def _estimate_usage(input_text: str, output_text: str) -> dict[str, int]:
+    input_tokens = _estimate_tokens(input_text)
+    output_tokens = _estimate_tokens(output_text)
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+    }
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 @dataclass
 class Conversation:
     id: str
@@ -163,20 +194,6 @@ class ConversationStore:
                 )
                 """
             )
-            self._ensure_column(
-                conn,
-                "conversations",
-                "last_user_text",
-                "TEXT NOT NULL DEFAULT ''",
-            )
-
-    def _ensure_column(
-        self, conn: sqlite3.Connection, table: str, column: str, ddl: str
-    ) -> None:
-        cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-        names = {str(col["name"]) for col in cols}
-        if column not in names:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def create_conversation(
         self,
@@ -290,7 +307,7 @@ class ConversationStore:
         self,
         owner_id: str,
         keep_count: int,
-    ) -> tuple[int, int]:
+    ) -> tuple[list[str], int]:
         keep_count = max(0, int(keep_count))
         conversations = self.list_conversations(owner_id)
         stale_conversations = conversations[keep_count:]
@@ -302,7 +319,7 @@ class ConversationStore:
         skipped_count = len(stale_conversations) - len(deletable_ids)
 
         if not deletable_ids:
-            return 0, skipped_count
+            return [], skipped_count
 
         placeholders = ", ".join("?" for _ in deletable_ids)
         with self._connection() as conn:
@@ -320,7 +337,7 @@ class ConversationStore:
                 """,
                 (owner_id, *deletable_ids),
             )
-        return len(deletable_ids), skipped_count
+        return deletable_ids, skipped_count
 
     def get_messages(self, conversation_id: str, owner_id: str) -> list[ConversationMessage]:
         if self.get_conversation(conversation_id, owner_id) is None:
@@ -348,6 +365,109 @@ class ConversationStore:
             )
             for row in rows
         ]
+
+    def get_statistics_summary(
+        self,
+        owner_id: str,
+        *,
+        start_at: str | None = None,
+        end_at: str | None = None,
+    ) -> dict[str, Any]:
+        start_dt = _parse_iso_datetime(start_at or "")
+        end_dt = _parse_iso_datetime(end_at or "")
+
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    m.conversation_id,
+                    m.role,
+                    m.content,
+                    m.created_at,
+                    m.response_id
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE c.owner_id = ?
+                ORDER BY
+                    m.conversation_id ASC,
+                    datetime(m.created_at) ASC,
+                    CASE
+                        WHEN m.role = 'user' THEN 0
+                        WHEN m.role = 'assistant' THEN 1
+                        ELSE 2
+                    END ASC,
+                    m.id ASC
+                """,
+                (owner_id,),
+            ).fetchall()
+
+        latest_user_messages: dict[str, dict[str, Any]] = {}
+        total_requests = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_tokens = 0
+        total_request_seconds = 0.0
+
+        for row in rows:
+            conversation_id = str(row["conversation_id"])
+            created_at = _parse_iso_datetime(str(row["created_at"] or ""))
+            if created_at is None:
+                continue
+
+            role = str(row["role"] or "")
+            content = str(row["content"] or "")
+
+            if role == "user":
+                latest_user_messages[conversation_id] = {
+                    "content": content,
+                    "created_at": created_at,
+                }
+                continue
+
+            if role != "assistant":
+                continue
+
+            if not str(row["response_id"] or "").strip():
+                continue
+            if start_dt is not None and created_at < start_dt:
+                continue
+            if end_dt is not None and created_at > end_dt:
+                continue
+
+            user_message = latest_user_messages.get(conversation_id)
+            if user_message is None:
+                continue
+
+            usage = _estimate_usage(str(user_message["content"]), content)
+            duration_seconds = max(
+                0.0,
+                (created_at - user_message["created_at"]).total_seconds(),
+            )
+
+            total_requests += 1
+            total_input_tokens += usage["input_tokens"]
+            total_output_tokens += usage["output_tokens"]
+            total_tokens += usage["total_tokens"]
+            total_request_seconds += duration_seconds
+
+        average_request_time_seconds = (
+            total_request_seconds / total_requests if total_requests else 0.0
+        )
+        average_tpm = (
+            total_output_tokens / (total_request_seconds / 60.0)
+            if total_request_seconds > 0
+            else 0.0
+        )
+        return {
+            "total_requests": total_requests,
+            "average_request_time_seconds": average_request_time_seconds,
+            "average_tpm": average_tpm,
+            "total_tokens": total_tokens,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "start_at": start_at,
+            "end_at": end_at,
+        }
 
     def find_conversation_by_tool_call_id(
         self, owner_id: str, tool_call_id: str

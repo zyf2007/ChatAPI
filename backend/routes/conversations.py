@@ -12,6 +12,17 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
     auth = deps.auth
     store = deps.store
     pending_turns = deps.pending_turns
+    realtime = app.extensions.get("chat_realtime")
+
+    def publish_sync(owner_id: str, conversation_id: str | None = None) -> None:
+        if realtime is None or not conversation_id:
+            return
+        realtime.publish_conversation_upsert(owner_id, conversation_id)
+
+    def publish_delete(owner_id: str, conversation_id: str) -> None:
+        if realtime is None:
+            return
+        realtime.publish_conversation_delete(owner_id, conversation_id)
 
     def conversation_payload(conversation) -> dict[str, Any]:
         return conversation.to_dict()
@@ -31,6 +42,7 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
                     "realtime_status": "aborted",
                 },
             )
+            publish_sync(owner, conversation.id)
 
     app.extensions["chat_reconcile_waiting"] = reconcile_waiting_conversations
 
@@ -51,6 +63,7 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
         data = request.get_json(silent=True) or {}
         title = build_title(str(data.get("title", "")).strip()) or "新会话"
         conversation = store.create_conversation(auth.owner_id(), title=title)
+        publish_sync(auth.owner_id(), conversation.id)
         return {"ok": True, "conversation": conversation_payload(conversation)}
 
     @app.get("/api/conversations/<conversation_id>")
@@ -76,10 +89,12 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
     @app.delete("/api/conversations/<conversation_id>")
     @auth.require_auth
     def delete_conversation(conversation_id: str):
+        owner = auth.owner_id()
         try:
-            store.delete_conversation(conversation_id, auth.owner_id())
+            store.delete_conversation(conversation_id, owner)
         except ValueError:
             return jsonify({"error": "conversation not found"}), 404
+        publish_delete(owner, conversation_id)
         return {"ok": True}
 
     @app.post("/api/conversations/prune")
@@ -94,13 +109,15 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
         if keep_count < 0:
             return jsonify({"error": "keep_count must be greater than or equal to 0"}), 400
 
-        deleted_count, skipped_count = store.delete_conversations_except_latest(
+        deleted_ids, skipped_count = store.delete_conversations_except_latest(
             auth.owner_id(),
             keep_count,
         )
+        for conversation_id in deleted_ids:
+            publish_delete(auth.owner_id(), conversation_id)
         return {
             "ok": True,
-            "deleted_count": deleted_count,
+            "deleted_count": len(deleted_ids),
             "skipped_count": skipped_count,
             "keep_count": keep_count,
         }
@@ -131,6 +148,7 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
                 "realtime_status": "aborted",
             },
         )
+        publish_sync(owner, conversation_id)
         return {"ok": True, "conversation": conversation_payload(updated)}
 
     @app.post("/api/conversations/<conversation_id>/rename")
@@ -144,4 +162,5 @@ def register_conversation_routes(app: Flask, *, deps: AppDependencies) -> None:
             conversation = store.update_conversation(conversation_id, auth.owner_id(), title=title)
         except ValueError:
             return jsonify({"error": "conversation not found"}), 404
+        publish_sync(auth.owner_id(), conversation_id)
         return {"ok": True, "conversation": conversation_payload(conversation)}

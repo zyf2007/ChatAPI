@@ -50,6 +50,7 @@ def stream_pending_turn(
     store: Any,
     build_abort_error: Callable[[str], tuple[dict[str, Any], int]],
     client_socket: Any,
+    publish_sync: Callable[[str, str | None], None] | None = None,
 ):
     message_id = f"msg_{uuid.uuid4().hex[:24]}"
 
@@ -126,7 +127,12 @@ def stream_pending_turn(
 
             while True:
                 if client_disconnected(client_socket):
-                    discard_pending_turn(pending, pending_turns=pending_turns, store=store)
+                    discard_pending_turn(
+                        pending,
+                        pending_turns=pending_turns,
+                        store=store,
+                        publish_sync=publish_sync,
+                    )
                     return
 
                 for chunk in pending_turns.consume_draft_chunks(pending.request_id):
@@ -275,7 +281,12 @@ def stream_pending_turn(
                 pending.stream_event.wait(0.5)
                 pending.stream_event.clear()
         except GeneratorExit:
-            discard_pending_turn(pending, pending_turns=pending_turns, store=store)
+            discard_pending_turn(
+                pending,
+                pending_turns=pending_turns,
+                store=store,
+                publish_sync=publish_sync,
+            )
             raise
 
     return build_stream_response(stream_with_context(generate()))

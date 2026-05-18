@@ -7,5 +7,6 @@ requires-python = ">=3.12"
 dependencies = [
     "flask>=3.1.0",
     "flask-cors>=6.0.2",
+    "flask-sock>=0.7.0",
     "python-dotenv>=1.2.2",
 ]

@@ -39,6 +39,7 @@ type ChatPaneProps = {
   isMobile: boolean
   isWaitingForUser: boolean
   keyboardOffset: number
+  messagesLoading: boolean
   onDraft: () => void | Promise<void>
   onLogout: () => void | Promise<void>
   onOpenDrawer: () => void
@@ -169,6 +170,7 @@ export function ChatPane(props: ChatPaneProps) {
     isMobile,
     isWaitingForUser,
     keyboardOffset,
+    messagesLoading,
     onDraft,
     onLogout,
     onOpenDrawer,
@@ -213,7 +215,11 @@ export function ChatPane(props: ChatPaneProps) {
       </div>
 
       <div ref={chatScrollRef} className="chat-scroll" onScroll={handleChatScroll}>
-        {visibleMessages.length === 0 ? (
+        {messagesLoading && visibleMessages.length === 0 ? (
+          <div className="empty-stage">
+            <Spin size="large" />
+          </div>
+        ) : visibleMessages.length === 0 ? (
           <div className="empty-stage">
             <Empty
               description={

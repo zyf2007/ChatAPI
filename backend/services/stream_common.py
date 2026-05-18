@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import select
 import socket
-from typing import Any
+from typing import Any, Callable
 
 from flask import Response
 
@@ -35,6 +35,7 @@ def discard_pending_turn(
     *,
     pending_turns: PendingTurnRegistry,
     store: Any,
+    publish_sync: Callable[[str, str | None], None] | None = None,
 ) -> None:
     discarded = pending_turns.discard(
         conversation_id=pending.conversation_id,
@@ -51,6 +52,8 @@ def discard_pending_turn(
             "realtime_status": "aborted",
         },
     )
+    if publish_sync is not None:
+        publish_sync(discarded.owner_id, discarded.conversation_id)
 
 
 def sse_event(event: str, data: dict[str, Any]) -> str:

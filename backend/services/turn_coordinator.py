@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from ..core import AppDependencies
 from ..repositories import build_title
@@ -34,13 +34,22 @@ class PreparedTurn:
 
 
 class TurnCoordinator:
-    def __init__(self, deps: AppDependencies, *, extensions: dict[str, Any], logger: Any):
+    def __init__(
+        self,
+        deps: AppDependencies,
+        *,
+        extensions: dict[str, Any],
+        logger: Any,
+        publish_sync: Callable[[str, str | None], None] | None = None,
+    ):
         self._deps = deps
         self._extensions = extensions
         self._logger = logger
+        self._publish_sync = publish_sync
         self._output_controller = TurnOutputController(
             store=deps.store,
             pending_turns=deps.pending_turns,
+            publish_sync=publish_sync,
         )
         self._automation_rules = AutomationRuleEngine(
             store=deps.store,
@@ -204,6 +213,7 @@ class TurnCoordinator:
                     "realtime_draft_text": "",
                 },
             )
+            self._notify(owner, conversation.id)
             self._automation_rules.start_for_pending(pending)
         except Exception:
             self.pending_turns.discard(
@@ -358,3 +368,8 @@ class TurnCoordinator:
             "draft_text": pending.draft_text,
             "draft_length": len(pending.draft_text),
         }
+
+    def _notify(self, owner_id: str, conversation_id: str) -> None:
+        if self._publish_sync is None:
+            return
+        self._publish_sync(owner_id, conversation_id)
