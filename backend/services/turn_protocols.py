@@ -129,6 +129,19 @@ def extract_text_content(node: Any) -> str:
     return "\n".join(parts).strip()
 
 
+def normalize_chatbox_history_content(content: str) -> str:
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        parsed = content
+    text = extract_text_content(parsed)
+    if text:
+        return text
+    if isinstance(parsed, str):
+        return parsed
+    return canonical_json(parsed)
+
+
 def extract_context_text(data: dict[str, Any], request_format: str) -> str:
     input_payload = request_input_payload(data, request_format)
     if isinstance(input_payload, str):
@@ -341,73 +354,62 @@ def extract_request_messages(
     return extracted
 
 
-def extract_comparable_request_messages(data: dict[str, Any], request_format: str) -> list[dict[str, str]]:
-    payload = request_input_payload(data, request_format)
-    items = payload if isinstance(payload, list) else [payload]
+def chatbox_comparable_messages_from_internal_messages(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, str]]:
     comparable: list[dict[str, str]] = []
-    for item in items:
-        if not isinstance(item, dict):
+    for message in messages:
+        if not isinstance(message, dict):
             continue
-        role = str(item.get("role", "")).strip()
-        item_type = str(item.get("type", "")).strip()
-        if role in {"system", "developer"}:
+        role = str(message.get("role", "")).strip()
+        if role not in {"user", "assistant", "tool"}:
             continue
-        if request_format == "anthropic_messages" and role == "user":
-            content_blocks = item.get("content")
-            content = serialize_content(content_blocks)
-            if content:
-                comparable.append(
-                    {
-                        "role": "user",
-                        "content": content,
-                    }
-                )
-            if not isinstance(content_blocks, list):
-                continue
-            for content_block in content_blocks:
-                if not isinstance(content_block, dict):
-                    continue
-                if str(content_block.get("type", "")).strip() != "tool_result":
-                    continue
-                content = serialize_content(content_block.get("content"))
-                if content:
-                    comparable.append(
-                        {
-                            "role": "tool",
-                            "content": content,
-                        }
-                    )
-            continue
-        if role in {"user", "assistant"}:
-            content = _assistant_request_content(item) if role == "assistant" else serialize_content(item.get("content"))
-            if content:
-                comparable.append(
-                    {
-                        "role": role,
-                        "content": content,
-                    }
-                )
-            continue
-        if request_format == "chat_completions" and role == "tool":
-            content = serialize_content(item.get("content"))
-            if content:
-                comparable.append(
-                    {
-                        "role": "tool",
-                        "content": content,
-                    }
-                )
-            continue
-        if item_type == "function_call_output":
-            content = serialize_content(item.get("output", ""))
-            if content:
-                comparable.append(
-                    {
-                        "role": "tool",
-                        "content": content,
-                    }
-                )
+        content = normalize_chatbox_history_content(str(message.get("content") or ""))
+        if content:
+            comparable.append(
+                {
+                    "role": role,
+                    "content": content,
+                }
+            )
     return comparable
+
+
+def extract_chatbox_comparable_request_messages(
+    store: ConversationStore,
+    data: dict[str, Any],
+    *,
+    owner: str,
+    request_format: str,
+) -> list[dict[str, str]]:
+    return chatbox_comparable_messages_from_internal_messages(
+        extract_request_messages(
+            store,
+            data,
+            conversation_id=None,
+            owner=owner,
+            request_format=request_format,
+        )
+    )
+
+
+def resolve_conversation_by_history_strategies(
+    store: ConversationStore,
+    data: dict[str, Any],
+    owner: str,
+    request_format: str,
+):
+    chatbox_messages = extract_chatbox_comparable_request_messages(
+        store,
+        data,
+        owner=owner,
+        request_format=request_format,
+    )
+    return store.find_conversation_by_message_history(
+        owner,
+        chatbox_messages,
+        normalize_stored_content=normalize_chatbox_history_content,
+    )
 
 
 def extract_tool_result_call_ids(data: dict[str, Any], request_format: str) -> list[str]:
@@ -463,8 +465,12 @@ def resolve_conversation_for_request(
         if conversation is not None:
             return conversation, None
 
-    comparable_messages = extract_comparable_request_messages(data, request_format)
-    conversation = store.find_conversation_by_message_history(owner, comparable_messages)
+    conversation = resolve_conversation_by_history_strategies(
+        store,
+        data,
+        owner,
+        request_format,
+    )
     if conversation is not None:
         return conversation, None
 

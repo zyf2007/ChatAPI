@@ -42,14 +42,17 @@ class RealtimeBroker:
             owner_id=owner_id,
             events=queue.Queue(maxsize=queue_size),
         )
+        affected_owners: set[str] = set()
         with self._lock:
-            self._enforce_limits_locked(
+            affected_owners |= self._enforce_limits_locked(
                 owner_id,
                 max_connections=max_connections,
                 max_connections_per_user=max_connections_per_user,
             )
             subscribers = self._subscriptions_by_owner.setdefault(owner_id, [])
             subscribers.append(subscription)
+            affected_owners.add(owner_id)
+        self._publish_connection_counts(affected_owners)
         return subscription
 
     def _enforce_limits_locked(
@@ -58,7 +61,8 @@ class RealtimeBroker:
         *,
         max_connections: int,
         max_connections_per_user: int,
-    ) -> None:
+    ) -> set[str]:
+        affected_owners: set[str] = set()
         max_connections = self._normalize_limit(max_connections)
         max_connections_per_user = self._normalize_limit(max_connections_per_user)
 
@@ -66,6 +70,7 @@ class RealtimeBroker:
             subscribers = self._subscriptions_by_owner.get(owner_id, [])
             while len(subscribers) >= max_connections_per_user:
                 oldest = subscribers.pop(0)
+                affected_owners.add(owner_id)
                 oldest.closed.set()
                 self._force_event(oldest, {"type": "disconnect", "reason": "connection_limit"})
             if subscribers:
@@ -74,7 +79,7 @@ class RealtimeBroker:
                 self._subscriptions_by_owner.pop(owner_id, None)
 
         if max_connections <= 0:
-            return
+            return affected_owners
         while self._connection_count_locked() >= max_connections:
             oldest_owner = ""
             oldest_subscription: RealtimeSubscription | None = None
@@ -84,17 +89,20 @@ class RealtimeBroker:
                     oldest_subscription = subscribers[0]
                     break
             if oldest_subscription is None:
-                return
+                return affected_owners
             self._subscriptions_by_owner[oldest_owner].pop(0)
             if not self._subscriptions_by_owner[oldest_owner]:
                 self._subscriptions_by_owner.pop(oldest_owner, None)
+            affected_owners.add(oldest_owner)
             oldest_subscription.closed.set()
             self._force_event(oldest_subscription, {"type": "disconnect", "reason": "connection_limit"})
+        return affected_owners
 
     def _connection_count_locked(self) -> int:
         return sum(len(items) for items in self._subscriptions_by_owner.values())
 
     def unsubscribe(self, subscription: RealtimeSubscription) -> None:
+        affected_owner: str | None = None
         with self._lock:
             subscribers = self._subscriptions_by_owner.get(subscription.owner_id)
             if not subscribers:
@@ -102,8 +110,11 @@ class RealtimeBroker:
             self._subscriptions_by_owner[subscription.owner_id] = [
                 item for item in subscribers if item is not subscription
             ]
+            affected_owner = subscription.owner_id
             if not self._subscriptions_by_owner[subscription.owner_id]:
                 self._subscriptions_by_owner.pop(subscription.owner_id, None)
+        if affected_owner is not None:
+            self._publish_connection_counts({affected_owner})
 
     def count_owner_connections(self, owner_id: str) -> int:
         with self._lock:
@@ -121,11 +132,16 @@ class RealtimeBroker:
         if conversation is None:
             self.publish_conversation_delete(owner_id, conversation_id)
             return
+        try:
+            messages = self._store.get_messages(conversation_id, owner_id)
+        except ValueError:
+            messages = []
         self._publish(
             owner_id,
             {
                 "type": "conversation_upsert",
                 "conversation": conversation.to_dict(),
+                "messages": [message.to_dict() for message in messages],
             },
         )
 
@@ -143,6 +159,16 @@ class RealtimeBroker:
             subscribers = tuple(self._subscriptions_by_owner.get(owner_id, ()))
         for subscription in subscribers:
             self._offer_event(subscription, event)
+
+    def _publish_connection_counts(self, owner_ids: set[str]) -> None:
+        for owner_id in owner_ids:
+            self._publish(
+                owner_id,
+                {
+                    "type": "connection_count",
+                    "current_connection_count": self.count_owner_connections(owner_id),
+                },
+            )
 
     @staticmethod
     def _offer_event(subscription: RealtimeSubscription, event: dict[str, Any]) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from flask import Flask, jsonify, request, session
 
 from ...core.auth import verify_totp_code
+from ...services.realtime import RealtimeBroker
 from .common import AuthRouteDeps, get_logger, verify_geetest
 
 
@@ -43,6 +44,17 @@ def register_session_routes(app: Flask, deps: AuthRouteDeps) -> None:
         user = deps.auth.current_user()
         ext_reg = deps.system_config_store.get_system_config("flag.external_registration", "0") == "1"
         geetest_enabled = bool(deps.settings.geetest_captcha_id)
+        realtime = app.extensions.get("chat_realtime")
+        current_connection_count = 0
+        if user is not None and isinstance(realtime, RealtimeBroker):
+            current_connection_count = realtime.count_owner_connections(user["id"])
+        try:
+            max_connection_per_user = int(
+                deps.system_config_store.get_system_config("value.realtime_max_connections_per_user", "0") or 0,
+            )
+        except ValueError:
+            max_connection_per_user = 0
+        max_connection_per_user = max(0, max_connection_per_user)
         if user is None:
             return {
                 "authenticated": False,
@@ -50,6 +62,8 @@ def register_session_routes(app: Flask, deps: AuthRouteDeps) -> None:
                 "registration_enabled": ext_reg,
                 "geetest_enabled": geetest_enabled,
                 "geetest_captcha_id": deps.settings.geetest_captcha_id if geetest_enabled else "",
+                "current_connection_count": 0,
+                "realtime_max_connections_per_user": max_connection_per_user,
             }
 
         db_user = deps.user_store.get_user(user["id"])
@@ -61,4 +75,6 @@ def register_session_routes(app: Flask, deps: AuthRouteDeps) -> None:
             "registration_enabled": ext_reg,
             "geetest_enabled": geetest_enabled,
             "geetest_captcha_id": deps.settings.geetest_captcha_id if geetest_enabled else "",
+            "current_connection_count": current_connection_count,
+            "realtime_max_connections_per_user": max_connection_per_user,
         }

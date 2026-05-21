@@ -127,29 +127,39 @@ export function ConversationSidebar({
             </Typography.Title>
           ) : null}
         </div>
-        <Space size={4}>
-          <Tooltip title={collapsed ? '展开侧边栏' : '收起侧边栏'}>
-            <Button
-              type="text"
-              size="small"
-              icon={collapsed ? <RightOutlined /> : <LeftOutlined />}
-              className="sidebar-action-button"
-              onClick={onToggleCollapsed}
-            />
-          </Tooltip>
-          {!collapsed ? (
-            <Tooltip title="删除最近 N 个会话以外的会话">
+        <div className="sidebar-top-actions">
+          <Space size={4}>
+            <Tooltip title={collapsed ? '展开侧边栏' : '收起侧边栏'}>
               <Button
                 type="text"
-                danger
                 size="small"
-                icon={<DeleteOutlined />}
+                icon={collapsed ? <RightOutlined /> : <LeftOutlined />}
                 className="sidebar-action-button"
+                onClick={onToggleCollapsed}
+              />
+            </Tooltip>
+            {!collapsed ? (
+              <Tooltip title="删除最近 N 个会话以外的会话">
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  className="sidebar-action-button"
                 onClick={() => setPruneModalOpen(true)}
               />
             </Tooltip>
           ) : null}
-        </Space>
+          </Space>
+          {!collapsed ? (
+            <Typography.Text className="sidebar-connection-count" type="secondary">
+              当前连接数 {auth.current_connection_count}/
+              {auth.realtime_max_connections_per_user === 0
+                ? '∞'
+                : auth.realtime_max_connections_per_user}
+            </Typography.Text>
+          ) : null}
+        </div>
       </div>
       <List
         className="conversation-list"

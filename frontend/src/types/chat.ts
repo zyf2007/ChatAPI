@@ -11,6 +11,8 @@ export type AuthSession = {
   registration_enabled: boolean
   geetest_enabled: boolean
   geetest_captcha_id: string
+  current_connection_count: number
+  realtime_max_connections_per_user: number
 }
 
 export type User = {
@@ -255,4 +257,9 @@ export type WorkspaceConversationUpsertEvent = {
 export type WorkspaceConversationDeleteEvent = {
   type: 'conversation_delete'
   conversation_id: string
+}
+
+export type WorkspaceConnectionCountEvent = {
+  type: 'connection_count'
+  current_connection_count: number
 }

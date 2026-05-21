@@ -4,6 +4,7 @@ import { resolveWebSocketUrl } from '../lib/api'
 import type {
   Conversation,
   MessageItem,
+  WorkspaceConnectionCountEvent,
   WorkspaceConversationDeleteEvent,
   WorkspaceConversationUpsertEvent,
   WorkspaceSnapshotEvent,
@@ -20,6 +21,7 @@ function sortConversations(items: Conversation[]) {
 type UseWorkspaceRealtimeParams = {
   authenticated: boolean
   conversations: Conversation[]
+  onConnectionCountChange: (value: number) => void
   selectedConversationId: string
   setConversations: Dispatch<SetStateAction<Conversation[]>>
   setDraftBuffers: Dispatch<SetStateAction<Record<string, string>>>
@@ -32,6 +34,7 @@ type UseWorkspaceRealtimeParams = {
 export function useWorkspaceRealtime({
   authenticated,
   conversations,
+  onConnectionCountChange,
   selectedConversationId,
   setConversations,
   setDraftBuffers,
@@ -108,6 +111,7 @@ export function useWorkspaceRealtime({
         if (!active) return
         let payload:
           | WorkspaceSnapshotEvent
+          | WorkspaceConnectionCountEvent
           | WorkspaceConversationUpsertEvent
           | WorkspaceConversationDeleteEvent
           | { type: 'disconnect'; reason?: string }
@@ -115,6 +119,7 @@ export function useWorkspaceRealtime({
         try {
           payload = JSON.parse(event.data) as
             | WorkspaceSnapshotEvent
+            | WorkspaceConnectionCountEvent
             | WorkspaceConversationUpsertEvent
             | WorkspaceConversationDeleteEvent
             | { type: 'disconnect'; reason?: string }
@@ -134,6 +139,11 @@ export function useWorkspaceRealtime({
           const nextConversations = sortConversations(payload.conversations)
           setConversations(nextConversations)
           applySelectedConversation(resolvePreferredConversationId(nextConversations))
+          return
+        }
+
+        if (payload.type === 'connection_count') {
+          onConnectionCountChange(payload.current_connection_count)
           return
         }
 
@@ -209,7 +219,13 @@ export function useWorkspaceRealtime({
       socketRef.current?.close()
       socketRef.current = null
     }
-  }, [authenticated, setConversations, setMessagesByConversation, setMessagesLoading])
+  }, [
+    authenticated,
+    onConnectionCountChange,
+    setConversations,
+    setMessagesByConversation,
+    setMessagesLoading,
+  ])
 
   return {
     applySelectedConversation,

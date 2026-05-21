@@ -7,4 +7,6 @@ export const DEFAULT_AUTH_SESSION: AuthSession = {
   registration_enabled: false,
   geetest_enabled: false,
   geetest_captcha_id: '',
+  current_connection_count: 0,
+  realtime_max_connections_per_user: 0,
 }

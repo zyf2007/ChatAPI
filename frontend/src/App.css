@@ -762,6 +762,15 @@
   gap: 10px;
 }
 
+.sidebar-top-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .eyebrow {
   font-size: 11px;
   letter-spacing: 0.12em;
@@ -798,6 +807,14 @@
 .sidebar-title {
   font-size: 18px !important;
   line-height: 1.2 !important;
+}
+
+.sidebar-connection-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-align: right;
 }
 
 .sidebar-action-button {

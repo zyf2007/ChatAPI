@@ -24,9 +24,10 @@ from .turn_request_tools import (
 )
 from .turn_protocols import (
     build_message_debug_metadata,
-    extract_comparable_request_messages,
+    extract_chatbox_comparable_request_messages,
     extract_context_text,
     extract_request_messages,
+    normalize_chatbox_history_content,
     normalize_message_text,
     request_input_payload,
     resolve_conversation_for_request,
@@ -164,14 +165,17 @@ class TurnCoordinator:
             owner=owner,
             request_format=request_format,
         )
-        comparable_messages = extract_comparable_request_messages(
+        comparable_messages = extract_chatbox_comparable_request_messages(
+            self.store,
             normalized_data,
-            request_format,
+            owner=owner,
+            request_format=request_format,
         )
         history_prefix_length = self.store.get_request_history_prefix_length(
             conversation.id,
             owner,
             comparable_messages,
+            normalize_stored_content=normalize_chatbox_history_content,
         )
         if history_prefix_length > 0 and len(extracted_messages) >= history_prefix_length:
             extracted_messages = extracted_messages[history_prefix_length:]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from .models import ConversationMessage, json_dump, json_load, utc_now_iso
 
@@ -110,6 +110,8 @@ class MessageCrudMixin:
         self,
         owner_id: str,
         messages: list[dict[str, str]],
+        *,
+        normalize_stored_content: Callable[[str], str] | None = None,
     ):
         if not messages:
             return None
@@ -117,9 +119,14 @@ class MessageCrudMixin:
         candidates = self.list_conversations(owner_id)
         best_match = None
         best_length = -1
+        normalize_content = normalize_stored_content or (lambda value: value)
 
         for conversation in candidates:
-            stored_messages = self._comparable_messages_for_conversation(conversation.id, owner_id)
+            stored_messages = self._comparable_messages_for_conversation(
+                conversation.id,
+                owner_id,
+                normalize_content=normalize_content,
+            )
             if not stored_messages or len(stored_messages) > len(messages):
                 continue
             request_prefix = [
@@ -139,8 +146,14 @@ class MessageCrudMixin:
         conversation_id: str,
         owner_id: str,
         messages: list[dict[str, str]],
+        *,
+        normalize_stored_content: Callable[[str], str] | None = None,
     ) -> int:
-        stored_messages = self._comparable_messages_for_conversation(conversation_id, owner_id)
+        stored_messages = self._comparable_messages_for_conversation(
+            conversation_id,
+            owner_id,
+            normalize_content=normalize_stored_content or (lambda value: value),
+        )
         if not stored_messages or len(stored_messages) > len(messages):
             return 0
         request_prefix = [
@@ -215,9 +228,11 @@ class MessageCrudMixin:
         self,
         conversation_id: str,
         owner_id: str,
+        *,
+        normalize_content: Callable[[str], str],
     ) -> list[dict[str, str]]:
         return [
-            {"role": message.role, "content": message.content}
+            {"role": message.role, "content": normalize_content(message.content)}
             for message in self.get_messages(conversation_id, owner_id)
             if message.role in self._COMPARABLE_ROLES
         ]

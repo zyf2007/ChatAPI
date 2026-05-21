@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
 import { requestJson } from '../lib/api'
 import { appMessage } from '../lib/antdApp'
@@ -52,9 +52,21 @@ export function useChatWorkspace(isMobile: boolean) {
   const keyboardOffset = useKeyboardOffset()
   const automation = useAutomationRules()
 
+  const handleConnectionCountChange = useCallback((value: number) => {
+    setAuth((current) =>
+      current.current_connection_count === value
+        ? current
+        : {
+            ...current,
+            current_connection_count: value,
+          },
+    )
+  }, [])
+
   const { applySelectedConversation } = useWorkspaceRealtime({
     authenticated: auth.authenticated,
     conversations,
+    onConnectionCountChange: handleConnectionCountChange,
     selectedConversationId,
     setConversations,
     setDraftBuffers,
