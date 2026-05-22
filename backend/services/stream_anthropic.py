@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, Generator
 
 from flask import stream_with_context
 
@@ -12,9 +12,9 @@ from .stream_common import (
     build_stream_response,
     client_disconnected,
     discard_pending_turn,
-    sse_data,
     sse_event,
 )
+from .thinking import ThinkingStreamParser
 
 
 def stream_anthropic_turn(
@@ -29,11 +29,106 @@ def stream_anthropic_turn(
     message_id = pending.response_id or f"msg_{uuid.uuid4().hex[:24]}"
 
     def generate():
-        sent_text = ""
-        block_started = False
+        sent_raw_text = ""
+        block_index = 0
+        open_text_block: dict[str, Any] | None = None
+        parser = ThinkingStreamParser()
+
         def emit(payload: dict[str, Any]) -> str:
             event_name = str(payload.get("type") or "message")
             return sse_event(event_name, payload)
+
+        def next_block_index() -> int:
+            nonlocal block_index
+            current = block_index
+            block_index += 1
+            return current
+
+        def start_text_block() -> Generator[str, None, None]:
+            nonlocal open_text_block
+            index = next_block_index()
+            open_text_block = {"index": index, "text": ""}
+            yield emit(
+                {
+                    "type": "content_block_start",
+                    "index": index,
+                    "content_block": {"type": "text", "text": ""},
+                }
+            )
+
+        def close_text_block() -> Generator[str, None, None]:
+            nonlocal open_text_block
+            if open_text_block is None:
+                return
+            index = int(open_text_block["index"])
+            yield emit({"type": "content_block_stop", "index": index})
+            open_text_block = None
+
+        def emit_text_delta(text: str) -> Generator[str, None, None]:
+            nonlocal open_text_block
+            if not text:
+                return
+            if open_text_block is None:
+                yield from start_text_block()
+            assert open_text_block is not None
+            index = int(open_text_block["index"])
+            open_text_block["text"] = str(open_text_block["text"]) + text
+            yield emit(
+                {
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": {
+                        "type": "text_delta",
+                        "text": text,
+                    },
+                }
+            )
+
+        def emit_thinking_block(text: str) -> Generator[str, None, None]:
+            if not text:
+                return
+            yield from close_text_block()
+            index = next_block_index()
+            yield emit(
+                {
+                    "type": "content_block_start",
+                    "index": index,
+                    "content_block": {
+                        "type": "thinking",
+                        "thinking": "",
+                        "signature": "mock-thinking",
+                    },
+                }
+            )
+            yield emit(
+                {
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": {
+                        "type": "thinking_delta",
+                        "thinking": text,
+                    },
+                }
+            )
+            yield emit(
+                {
+                    "type": "content_block_delta",
+                    "index": index,
+                    "delta": {
+                        "type": "signature_delta",
+                        "signature": "mock-thinking",
+                    },
+                }
+            )
+            yield emit({"type": "content_block_stop", "index": index})
+
+        def emit_parsed_text(text: str = "", *, flush: bool = False) -> Generator[str, None, None]:
+            parts = parser.flush() if flush else parser.feed(text)
+            for part in parts:
+                if part["type"] == "thinking":
+                    yield from emit_thinking_block(part["text"])
+                else:
+                    yield from emit_text_delta(part["text"])
 
         try:
             yield emit(
@@ -52,14 +147,6 @@ def stream_anthropic_turn(
                     },
                 }
             )
-            yield emit(
-                {
-                    "type": "content_block_start",
-                    "index": 0,
-                    "content_block": {"type": "text", "text": ""},
-                }
-            )
-            block_started = True
 
             while True:
                 if client_disconnected(client_socket):
@@ -72,17 +159,8 @@ def stream_anthropic_turn(
                     return
 
                 for piece in pending_turns.consume_draft_chunks(pending.request_id):
-                    sent_text += piece
-                    yield emit(
-                        {
-                            "type": "content_block_delta",
-                            "index": 0,
-                            "delta": {
-                                "type": "text_delta",
-                                "text": piece,
-                            },
-                        }
-                    )
+                    sent_raw_text += piece
+                    yield from emit_parsed_text(piece)
 
                 if pending.event.is_set():
                     finalized = pending_turns.wait(pending.request_id)
@@ -94,13 +172,14 @@ def stream_anthropic_turn(
                         return
                     usage = estimate_usage(finalized.input_text, finalized.assistant_text)
                     if finalized.response_mode == "tool_call":
-                        if block_started:
-                            yield emit({"type": "content_block_stop", "index": 0})
+                        yield from emit_parsed_text(flush=True)
+                        yield from close_text_block()
                         metadata = finalized.response_output_items[0] if finalized.response_output_items else {}
+                        index = next_block_index()
                         yield emit(
                             {
                                 "type": "content_block_start",
-                                "index": 1,
+                                "index": index,
                                 "content_block": {
                                     "type": "tool_use",
                                     "id": str(metadata.get("call_id", "")),
@@ -112,31 +191,24 @@ def stream_anthropic_turn(
                         yield emit(
                             {
                                 "type": "content_block_delta",
-                                "index": 1,
+                                "index": index,
                                 "delta": {
                                     "type": "input_json_delta",
                                     "partial_json": str(metadata.get("arguments", "")),
                                 },
                             }
                         )
-                        yield emit({"type": "content_block_stop", "index": 1})
+                        yield emit({"type": "content_block_stop", "index": index})
                         stop_reason = "tool_use"
                     else:
                         remaining = finalized.assistant_text
-                        if remaining.startswith(sent_text):
-                            remaining = remaining[len(sent_text):]
+                        if remaining.startswith(sent_raw_text):
+                            remaining = remaining[len(sent_raw_text):]
                         if remaining:
-                            yield emit(
-                                {
-                                    "type": "content_block_delta",
-                                    "index": 0,
-                                    "delta": {
-                                        "type": "text_delta",
-                                        "text": remaining,
-                                    },
-                                }
-                            )
-                        yield emit({"type": "content_block_stop", "index": 0})
+                            sent_raw_text += remaining
+                            yield from emit_parsed_text(remaining)
+                        yield from emit_parsed_text(flush=True)
+                        yield from close_text_block()
                         stop_reason = "end_turn"
                     yield emit(
                         {

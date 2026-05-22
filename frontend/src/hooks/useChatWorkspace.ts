@@ -33,6 +33,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const [loadedConversationIds, setLoadedConversationIds] = useState<Set<string>>(() => new Set())
   const [messagesLoading, setMessagesLoading] = useState(true)
   const [composer, setComposer] = useState('')
+  const [thinkingText, setThinkingText] = useState('')
   const [composerMode, setComposerMode] = useState<ComposerMode>('assistant_message')
   const [toolName, setToolName] = useState('')
   const [toolCallId, setToolCallId] = useState('')
@@ -98,6 +99,27 @@ export function useChatWorkspace(isMobile: boolean) {
       ...prev,
       [conversationId]: value,
     }))
+  }
+
+  function buildAssistantTextWithThinking(answerText: string, reasoningText: string) {
+    const normalizedAnswer = answerText.trim()
+    const normalizedReasoning = reasoningText.trim()
+    if (!normalizedReasoning) return normalizedAnswer
+    const thinkingBlock = `<think>
+${normalizedReasoning}
+</think>`
+    return normalizedAnswer ? `${thinkingBlock}
+
+${normalizedAnswer}` : thinkingBlock
+  }
+
+  function clearThinkingInput() {
+    setThinkingText('')
+  }
+
+  function withDraftSeparator(text: string) {
+    if (!draftBuffer.trim()) return text
+    return text.startsWith('\n') ? text : `\n\n${text}`
   }
 
   useEffect(() => {
@@ -182,6 +204,7 @@ export function useChatWorkspace(isMobile: boolean) {
       setLoadedConversationIds(new Set())
       setMessagesLoading(false)
       setComposer('')
+      clearThinkingInput()
       setComposerMode('assistant_message')
       setToolName('')
       setToolCallId('')
@@ -211,6 +234,7 @@ export function useChatWorkspace(isMobile: boolean) {
     applySelectedConversation(conversationId)
     if (isMobile) setDrawerOpen(false)
     setComposerMode('assistant_message')
+    clearThinkingInput()
     setToolName('')
     setToolCallId('')
     setToolFormValues({})
@@ -300,8 +324,12 @@ export function useChatWorkspace(isMobile: boolean) {
       await handleSend({ resetMode: true, successMessage: '已输出 Tool Call' })
       return
     }
-    const chunk = composer.trim()
-    if (!chunk) return
+    const isThinkingMode = composerMode === 'thinking'
+    const rawChunk = isThinkingMode
+      ? buildAssistantTextWithThinking('', thinkingText.trim())
+      : composer.trim()
+    if (!rawChunk) return
+    const chunk = withDraftSeparator(rawChunk)
     try {
       const response = await requestJson<{
         draft_text?: string
@@ -317,8 +345,12 @@ export function useChatWorkspace(isMobile: boolean) {
         selectedConversationId,
         typeof response.draft_text === 'string' ? response.draft_text : `${draftBuffer}${chunk}`,
       )
-      setComposer('')
-      appMessage.success('已输出片段')
+      if (isThinkingMode) {
+        clearThinkingInput()
+      } else {
+        setComposer('')
+      }
+      appMessage.success(isThinkingMode ? '已输出思考' : '已输出片段')
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '输出片段失败')
     }
@@ -357,13 +389,14 @@ export function useChatWorkspace(isMobile: boolean) {
     setSending(true)
     try {
       if (composerMode === 'assistant_message' && pendingChunk) {
+        const outputChunk = withDraftSeparator(pendingChunk)
         const draftResponse = await requestJson<{
           draft_text?: string
           draft_length: number
         }>('/api/chat/output/delta', {
           method: 'POST',
           body: JSON.stringify({
-            text: pendingChunk,
+            text: outputChunk,
             conversation_id: selectedConversationId || undefined,
           }),
         })
@@ -371,7 +404,7 @@ export function useChatWorkspace(isMobile: boolean) {
           selectedConversationId,
           typeof draftResponse.draft_text === 'string'
             ? draftResponse.draft_text
-            : `${draftBuffer}${pendingChunk}`,
+            : `${draftBuffer}${outputChunk}`,
         )
       }
 
@@ -431,6 +464,7 @@ export function useChatWorkspace(isMobile: boolean) {
     chatScrollRef,
     composer,
     composerMode,
+    thinkingText,
     conversations,
     deletingConversationId,
     draftBuffer,
@@ -469,6 +503,7 @@ export function useChatWorkspace(isMobile: boolean) {
     setAbortReason,
     setComposer,
     setComposerMode,
+    setThinkingText,
     setDrawerOpen,
     setEditingAutomationRule: automation.setEditingAutomationRule,
     setPruneKeepCount,

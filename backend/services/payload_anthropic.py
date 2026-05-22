@@ -3,12 +3,36 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .thinking import has_thinking, split_thinking_parts
+
 
 def parse_json_object(text: str) -> Any:
     try:
         return json.loads(text)
     except (TypeError, json.JSONDecodeError):
         return text
+
+
+def _build_anthropic_text_content(assistant_text: str) -> list[dict[str, Any]]:
+    if not has_thinking(assistant_text):
+        return [{"type": "text", "text": assistant_text}]
+    parts = split_thinking_parts(assistant_text)
+    if not parts:
+        return [{"type": "text", "text": ""}]
+
+    content: list[dict[str, Any]] = []
+    for part in parts:
+        if part["type"] == "thinking":
+            content.append(
+                {
+                    "type": "thinking",
+                    "thinking": part["text"],
+                    "signature": "mock-thinking",
+                }
+            )
+        else:
+            content.append({"type": "text", "text": part["text"]})
+    return content or [{"type": "text", "text": assistant_text}]
 
 
 def build_anthropic_message_response(
@@ -35,7 +59,7 @@ def build_anthropic_message_response(
             }
         ]
     else:
-        content = [{"type": "text", "text": assistant_text}]
+        content = _build_anthropic_text_content(assistant_text)
     return {
         "id": response_id,
         "type": "message",

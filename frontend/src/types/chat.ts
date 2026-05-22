@@ -148,7 +148,7 @@ export type ToolSchemaOption = {
 }
 
 export type ToolFieldValue = string | number | boolean
-export type ComposerMode = 'assistant_message' | 'tool_call'
+export type ComposerMode = 'assistant_message' | 'thinking' | 'tool_call'
 export type VisibleMessage = MessageItem & { draft?: boolean }
 export type GeetestValidationResult = {
   lot_number: string

@@ -585,6 +585,23 @@
   border-color: rgba(249, 115, 22, 0.2);
 }
 
+:root[data-theme='dark'] .message-thinking-card {
+  background: rgba(24, 35, 52, 0.84);
+  border-color: rgba(96, 165, 250, 0.18);
+}
+
+:root[data-theme='dark'] .message-thinking-card summary {
+  color: #93c5fd;
+}
+
+:root[data-theme='dark'] .message-thinking-hint {
+  color: rgba(147, 197, 253, 0.66);
+}
+
+:root[data-theme='dark'] .message-thinking-body {
+  border-top-color: rgba(96, 165, 250, 0.14);
+}
+
 :root[data-theme='dark'] .ant-input,
 :root[data-theme='dark'] .ant-input-affix-wrapper,
 :root[data-theme='dark'] .ant-input-number,
@@ -659,6 +676,16 @@
 :root[data-theme='dark'] .tool-call-panel .ant-input,
 :root[data-theme='dark'] .tool-call-panel .ant-input-affix-wrapper {
   background: rgba(22, 25, 31, 0.98) !important;
+}
+
+:root[data-theme='dark'] .thinking-panel {
+  background: linear-gradient(180deg, rgba(24, 35, 52, 0.96), rgba(22, 25, 31, 0.98));
+  border-color: rgba(96, 165, 250, 0.18);
+}
+
+:root[data-theme='dark'] .thinking-textarea {
+  background: rgba(17, 24, 39, 0.84) !important;
+  border-color: rgba(96, 165, 250, 0.22) !important;
 }
 
 :root[data-theme='dark'] .ant-input-number-handler {
@@ -1719,9 +1746,72 @@
 
 .message-text-block + .message-text-block,
 .message-text-block + .message-image-card,
+.message-text-block + .message-thinking-card,
 .message-image-card + .message-text-block,
-.message-image-card + .message-image-card {
+.message-image-card + .message-image-card,
+.message-image-card + .message-thinking-card,
+.message-thinking-card + .message-text-block,
+.message-thinking-card + .message-image-card,
+.message-thinking-card + .message-thinking-card {
   margin-top: 10px;
+}
+
+.message-thinking-card {
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  background: rgba(239, 246, 255, 0.86);
+  overflow: hidden;
+}
+
+.message-thinking-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  padding: 8px 10px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.message-thinking-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.message-thinking-card summary::before {
+  content: '▶';
+  flex: 0 0 auto;
+  font-size: 10px;
+  transition: transform 0.16s ease;
+}
+
+.message-thinking-card[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.message-thinking-card summary span:first-child {
+  flex: 1 1 auto;
+}
+
+.message-thinking-hint {
+  color: rgba(37, 99, 235, 0.68);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.message-thinking-card[open] .message-thinking-hint {
+  opacity: 0;
+}
+
+.message-thinking-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(59, 130, 246, 0.12);
+  color: var(--app-text-secondary);
+  white-space: pre-wrap;
+  line-height: 1.65;
 }
 
 .message-image-card {
@@ -2029,6 +2119,54 @@ body.image-preview-open {
 .composer-mode-row {
   display: flex;
   justify-content: flex-start;
+}
+
+.composer-mode-row {
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.thinking-toggle.active {
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.16);
+}
+
+.thinking-panel,
+.answer-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.thinking-panel {
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(248, 250, 252, 0.96));
+  border: 1px solid rgba(59, 130, 246, 0.16);
+}
+
+.thinking-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.thinking-panel-title,
+.answer-panel-label {
+  color: var(--app-text) !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.thinking-panel-hint {
+  color: var(--app-text-muted) !important;
+  font-size: 12px !important;
+}
+
+.thinking-textarea {
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(59, 130, 246, 0.2) !important;
 }
 
 .tool-call-panel {

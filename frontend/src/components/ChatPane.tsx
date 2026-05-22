@@ -54,9 +54,11 @@ type ChatPaneProps = {
   sending: boolean
   setComposer: (value: string) => void
   setComposerMode: (value: ComposerMode) => void
+  setThinkingText: (value: string) => void
   setToolCallId: (value: string) => void
   setToolFormValues: Dispatch<SetStateAction<Record<string, ToolFieldValue>>>
   setToolName: (value: string) => void
+  thinkingText: string
   toolCallId: string
   toolFormValues: Record<string, ToolFieldValue>
   toolName: string
@@ -84,9 +86,11 @@ export function ChatPane(props: ChatPaneProps) {
     sending,
     setComposer,
     setComposerMode,
+    setThinkingText,
     setToolCallId,
     setToolFormValues,
     setToolName,
+    thinkingText,
     toolCallId,
     toolFormValues,
     toolName,
@@ -225,6 +229,7 @@ export function ChatPane(props: ChatPaneProps) {
                 }}
                 options={[
                   { label: 'Assistant Message', value: 'assistant_message' },
+                  { label: '添加思考', value: 'thinking' },
                   { label: 'Tool Call', value: 'tool_call' },
                 ]}
                 disabled={sending || !isWaitingForUser}
@@ -292,20 +297,44 @@ export function ChatPane(props: ChatPaneProps) {
                 )}
               </div>
             )}
+            {composerMode === 'thinking' && (
+              <div className="thinking-panel">
+                <div className="thinking-panel-header">
+                  <Typography.Text className="thinking-panel-title">公开思考内容</Typography.Text>
+                  <Typography.Text className="thinking-panel-hint">
+                    会自动以 &lt;think&gt;...&lt;/think&gt; 输出给调用方
+                  </Typography.Text>
+                </div>
+                <TextArea
+                  value={thinkingText}
+                  onChange={(event) => setThinkingText(event.target.value)}
+                  placeholder={
+                    isWaitingForUser
+                      ? '输入要展示给调用方看的思考过程，点击“输出思考”会追加到当前回复草稿里。'
+                      : '当前没有等待中的 user 请求。'
+                  }
+                  autoSize={{ minRows: 4, maxRows: 10 }}
+                  className="composer-textarea thinking-textarea"
+                  disabled={sending || !isWaitingForUser}
+                />
+              </div>
+            )}
             {composerMode === 'assistant_message' && (
-              <TextArea
-                value={composer}
-                onChange={(event) => setComposer(event.target.value)}
-                onKeyDown={handleComposerKeyDown}
-                placeholder={
-                  isWaitingForUser
-                    ? '输入你作为 assistant 的回复。点“流式输出”会把当前内容追加到这轮回复里，点“结束输出”会结束这一轮。'
-                    : '当前没有等待中的 user 请求。'
-                }
-                autoSize={{ minRows: 4, maxRows: 10 }}
-                className="composer-textarea"
-                disabled={sending || !isWaitingForUser}
-              />
+              <div className="answer-panel">
+                <TextArea
+                  value={composer}
+                  onChange={(event) => setComposer(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  placeholder={
+                    isWaitingForUser
+                      ? '输入你作为 assistant 的回复。点“流式输出”会把当前内容追加到这轮回复里，点“结束输出”会结束这一轮。'
+                      : '当前没有等待中的 user 请求。'
+                  }
+                  autoSize={{ minRows: 4, maxRows: 10 }}
+                  className="composer-textarea"
+                  disabled={sending || !isWaitingForUser}
+                />
+              </div>
             )}
           </Space>
           <Flex justify="space-between" align="center" gap={12} wrap className="composer-actions">
@@ -313,21 +342,31 @@ export function ChatPane(props: ChatPaneProps) {
               {isWaitingForUser
                 ? composerMode === 'assistant_message'
                   ? '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
-                  : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
+                  : composerMode === 'thinking'
+                    ? '思考内容会包成 <think>...</think> 追加到当前回复草稿，不会结束这一轮。'
+                    : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
                 : '没有新的 user 请求时不能输出回复。'}
             </Typography.Text>
             <Space>
               <Button
-                type={composerMode === 'tool_call' ? 'primary' : 'default'}
+                type={composerMode === 'assistant_message' ? 'default' : 'primary'}
                 icon={<SaveOutlined />}
                 onClick={() => void onDraft()}
                 disabled={
                   !isWaitingForUser ||
                   sending ||
-                  (composerMode === 'assistant_message' ? !composer.trim() : !toolName.trim())
+                  (composerMode === 'assistant_message'
+                    ? !composer.trim()
+                    : composerMode === 'thinking'
+                      ? !thinkingText.trim()
+                      : !toolName.trim())
                 }
               >
-                {composerMode === 'assistant_message' ? '流式输出' : '输出 Tool Call'}
+                {composerMode === 'assistant_message'
+                  ? '流式输出'
+                  : composerMode === 'thinking'
+                    ? '输出思考'
+                    : '输出 Tool Call'}
               </Button>
               <Button
                 type={composerMode === 'assistant_message' ? 'primary' : 'default'}

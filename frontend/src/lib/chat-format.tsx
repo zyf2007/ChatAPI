@@ -7,6 +7,7 @@ import type {
 
 type RenderableContentPart =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; text: string }
   | { type: 'image'; src: string; detail?: string }
 
 type RenderMessageContentOptions = {
@@ -19,6 +20,35 @@ function normalizeDisplayText(value: string): string {
     .replace(/\\r\\n/g, '\n')
     .replace(/\\n/g, '\n')
 }
+
+function splitThinkingBlocks(value: string): RenderableContentPart[] {
+  const normalized = normalizeDisplayText(value)
+  const pattern = /<think(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/think>/gi
+  const parts: RenderableContentPart[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = pattern.exec(normalized)) !== null) {
+    const before = normalized.slice(lastIndex, match.index).trim()
+    if (before) {
+      parts.push({ type: 'text', text: before })
+    }
+
+    const thinkingText = String(match[1] ?? '').trim()
+    if (thinkingText) {
+      parts.push({ type: 'thinking', text: thinkingText })
+    }
+    lastIndex = pattern.lastIndex
+  }
+
+  const after = normalized.slice(lastIndex).trim()
+  if (after) {
+    parts.push({ type: 'text', text: after })
+  }
+
+  return parts.length > 0 ? parts : [{ type: 'text', text: normalized }]
+}
+
 
 export function formatTime(value: string) {
   if (!value) return ''
@@ -189,7 +219,7 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
   const fallback = rawContent.trim()
     ? isRenderableImageUrl(rawContent.trim())
       ? [{ type: 'image', src: rawContent.trim() } satisfies RenderableContentPart]
-      : [{ type: 'text', text: normalizeDisplayText(rawContent) } satisfies RenderableContentPart]
+      : splitThinkingBlocks(rawContent)
     : []
 
   const parsed = tryParseStructuredContent(rawContent)
@@ -202,7 +232,7 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
       if (isRenderableImageUrl(value)) {
         parts.push({ type: 'image', src: value.trim() })
       } else if (value.trim()) {
-        parts.push({ type: 'text', text: normalizeDisplayText(value) })
+        parts.push(...splitThinkingBlocks(value))
       }
       return
     }
@@ -264,7 +294,7 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
         itemType === 'text' ||
         !itemType)
     ) {
-      parts.push({ type: 'text', text: normalizeDisplayText(record.text) })
+      parts.push(...splitThinkingBlocks(record.text))
       return
     }
 
@@ -292,6 +322,9 @@ export function renderMessageContent(
   const parts = parseRenderableContent(rawContent)
   if (parts.length === 0) return null
 
+  const thinkingTotal = parts.filter((part) => part.type === 'thinking').length
+  let thinkingSequence = 0
+
   return parts.map((part, index) => {
     if (part.type === 'image') {
       return (
@@ -309,6 +342,20 @@ export function renderMessageContent(
         </figure>
       )
     }
+
+    if (part.type === 'thinking') {
+      thinkingSequence += 1
+      return (
+        <details key={`thinking-${index}`} className="message-thinking-card">
+          <summary>
+            <span>{thinkingTotal > 1 ? `思考内容 ${thinkingSequence}` : '思考内容'}</span>
+            <span className="message-thinking-hint">点击展开</span>
+          </summary>
+          <div className="message-thinking-body">{part.text}</div>
+        </details>
+      )
+    }
+
     return (
       <div key={`text-${index}`} className="message-text-block">
         {part.text}
