@@ -85,6 +85,22 @@ class SystemConfigStore:
             return []
         return [item for item in self._normalize_registration_email_domains(raw).split(",") if item]
 
+    def _normalize_model_ids(self, raw: str) -> str:
+        model_ids: list[str] = []
+        for item in raw.replace("\n", ",").split(","):
+            model_id = item.strip()
+            if not model_id:
+                continue
+            model_ids.append(model_id)
+        return "\n".join(dict.fromkeys(model_ids))
+
+    def get_model_ids(self) -> list[str]:
+        raw = self.get_system_config("value.model_ids", "")
+        normalized = self._normalize_model_ids(raw)
+        if not normalized:
+            return []
+        return [item for item in normalized.split("\n") if item]
+
     def is_registration_email_allowed(self, email: str) -> bool:
         if not self.get_system_config_flag("flag.registration_email_domain_restriction", False):
             return True

@@ -4,6 +4,7 @@ import { Modal, Tabs } from 'antd'
 import type { AutomationRule, AuthUser } from '../../types/chat'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
 import { AutomationRulesPanel } from './AutomationRulesPanel'
+import { ModelManagementPanel } from './ModelManagementPanel'
 import { StatisticsPanel } from './StatisticsPanel'
 import { SystemSettingsPanel } from './SystemSettingsPanel'
 import { UserManagementPanel } from './UserManagementPanel'
@@ -24,7 +25,7 @@ type SettingsModalProps = {
   onTotpRefresh: () => void
 }
 
-type TabKey = 'statistics' | 'user-settings' | 'api-keys' | 'automation' | 'system' | 'users'
+type TabKey = 'statistics' | 'user-settings' | 'api-keys' | 'models' | 'automation' | 'system' | 'users'
 
 export function SettingsModal({
   automationRuleEditorOpen,
@@ -72,21 +73,27 @@ export function SettingsModal({
       label: 'API Keys',
       children: <ApiKeyManagementPanel open={open && activeTab === 'api-keys'} />,
     },
-    {
-      key: 'user-settings',
-      label: '我的设置',
-      children: (
-        <UserSettingsPanel
-          open={open && activeTab === 'user-settings'}
-          onClose={onClose}
-          totpEnabled={totpEnabled}
-          onTotpRefresh={onTotpRefresh}
-        />
-      ),
-    },
   ]
 
+  const userSettingsTab = {
+    key: 'user-settings',
+    label: isAdmin ? <span style={{ color: '#13c2c2' }}>我的设置</span> : '我的设置',
+    children: (
+      <UserSettingsPanel
+        open={open && activeTab === 'user-settings'}
+        onClose={onClose}
+        totpEnabled={totpEnabled}
+        onTotpRefresh={onTotpRefresh}
+      />
+    ),
+  }
+
   const adminTabs = [
+    {
+      key: 'models',
+      label: '模型管理',
+      children: <ModelManagementPanel open={open && activeTab === 'models'} />,
+    },
     {
       key: 'system',
       label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
@@ -104,7 +111,7 @@ export function SettingsModal({
     },
   ]
 
-  const tabs = isAdmin ? [...commonTabs, ...adminTabs] : commonTabs
+  const tabs = isAdmin ? [...commonTabs, adminTabs[0], userSettingsTab, ...adminTabs.slice(1)] : [...commonTabs, userSettingsTab]
 
   return (
     <Modal
