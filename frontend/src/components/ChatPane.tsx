@@ -19,7 +19,7 @@ import {
   Space,
   Typography,
 } from 'antd'
-import { LogoutOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
+import { BulbOutlined, LogoutOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
 
 import { GithubButton } from './GithubButton'
 import { ThemeToggle } from './ThemeToggle'
@@ -54,9 +54,13 @@ type ChatPaneProps = {
   sending: boolean
   setComposer: (value: string) => void
   setComposerMode: (value: ComposerMode) => void
+  setThinkingEnabled: (value: boolean) => void
+  setThinkingText: (value: string) => void
   setToolCallId: (value: string) => void
   setToolFormValues: Dispatch<SetStateAction<Record<string, ToolFieldValue>>>
   setToolName: (value: string) => void
+  thinkingEnabled: boolean
+  thinkingText: string
   toolCallId: string
   toolFormValues: Record<string, ToolFieldValue>
   toolName: string
@@ -84,9 +88,13 @@ export function ChatPane(props: ChatPaneProps) {
     sending,
     setComposer,
     setComposerMode,
+    setThinkingEnabled,
+    setThinkingText,
     setToolCallId,
     setToolFormValues,
     setToolName,
+    thinkingEnabled,
+    thinkingText,
     toolCallId,
     toolFormValues,
     toolName,
@@ -229,6 +237,24 @@ export function ChatPane(props: ChatPaneProps) {
                 ]}
                 disabled={sending || !isWaitingForUser}
               />
+              {composerMode === 'assistant_message' ? (
+                <Button
+                  icon={<BulbOutlined />}
+                  type={thinkingEnabled ? 'primary' : 'default'}
+                  className={`thinking-toggle ${thinkingEnabled ? 'active' : ''}`}
+                  disabled={sending || !isWaitingForUser}
+                  onClick={() => {
+                    if (thinkingEnabled) {
+                      setThinkingEnabled(false)
+                      setThinkingText('')
+                      return
+                    }
+                    setThinkingEnabled(true)
+                  }}
+                >
+                  {thinkingEnabled ? '隐藏思考' : '添加思考'}
+                </Button>
+              ) : null}
             </div>
             {composerMode === 'tool_call' && (
               <div className="tool-call-panel">
@@ -292,27 +318,58 @@ export function ChatPane(props: ChatPaneProps) {
                 )}
               </div>
             )}
+            {composerMode === 'assistant_message' && thinkingEnabled && (
+              <div className="thinking-panel">
+                <div className="thinking-panel-header">
+                  <Typography.Text className="thinking-panel-title">公开思考内容</Typography.Text>
+                  <Typography.Text className="thinking-panel-hint">
+                    会自动以 &lt;think&gt;...&lt;/think&gt; 输出给调用方
+                  </Typography.Text>
+                </div>
+                <TextArea
+                  value={thinkingText}
+                  onChange={(event) => setThinkingText(event.target.value)}
+                  placeholder={
+                    isWaitingForUser
+                      ? '输入要展示给调用方看的思考过程。'
+                      : '当前没有等待中的 user 请求。'
+                  }
+                  autoSize={{ minRows: 3, maxRows: 8 }}
+                  className="composer-textarea thinking-textarea"
+                  disabled={sending || !isWaitingForUser}
+                />
+              </div>
+            )}
             {composerMode === 'assistant_message' && (
-              <TextArea
-                value={composer}
-                onChange={(event) => setComposer(event.target.value)}
-                onKeyDown={handleComposerKeyDown}
-                placeholder={
-                  isWaitingForUser
-                    ? '输入你作为 assistant 的回复。点“流式输出”会把当前内容追加到这轮回复里，点“结束输出”会结束这一轮。'
-                    : '当前没有等待中的 user 请求。'
-                }
-                autoSize={{ minRows: 4, maxRows: 10 }}
-                className="composer-textarea"
-                disabled={sending || !isWaitingForUser}
-              />
+              <div className="answer-panel">
+                {thinkingEnabled ? (
+                  <Typography.Text className="answer-panel-label">最终回答</Typography.Text>
+                ) : null}
+                <TextArea
+                  value={composer}
+                  onChange={(event) => setComposer(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  placeholder={
+                    isWaitingForUser
+                      ? thinkingEnabled
+                        ? '输入最终回答；发送时会跟公开思考一起输出。'
+                        : '输入你作为 assistant 的回复。点“流式输出”会把当前内容追加到这轮回复里，点“结束输出”会结束这一轮。'
+                      : '当前没有等待中的 user 请求。'
+                  }
+                  autoSize={{ minRows: 4, maxRows: 10 }}
+                  className="composer-textarea"
+                  disabled={sending || !isWaitingForUser}
+                />
+              </div>
             )}
           </Space>
           <Flex justify="space-between" align="center" gap={12} wrap className="composer-actions">
             <Typography.Text className="composer-hint">
               {isWaitingForUser
                 ? composerMode === 'assistant_message'
-                  ? '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
+                  ? thinkingEnabled
+                    ? '思考内容会包成 <think>...</think> 并放在最终回答前输出。已有流式草稿后不能再插入思考。'
+                    : '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
                   : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
                 : '没有新的 user 请求时不能输出回复。'}
             </Typography.Text>
@@ -324,7 +381,9 @@ export function ChatPane(props: ChatPaneProps) {
                 disabled={
                   !isWaitingForUser ||
                   sending ||
-                  (composerMode === 'assistant_message' ? !composer.trim() : !toolName.trim())
+                  (composerMode === 'assistant_message'
+                    ? !composer.trim() && !(thinkingEnabled && thinkingText.trim())
+                    : !toolName.trim())
                 }
               >
                 {composerMode === 'assistant_message' ? '流式输出' : '输出 Tool Call'}
@@ -338,7 +397,7 @@ export function ChatPane(props: ChatPaneProps) {
                   sending ||
                   !isWaitingForUser ||
                   composerMode !== 'assistant_message' ||
-                  (!composer.trim() && !draftBuffer.trim())
+                  (!composer.trim() && !draftBuffer.trim() && !(thinkingEnabled && thinkingText.trim()))
                 }
               >
                 结束输出

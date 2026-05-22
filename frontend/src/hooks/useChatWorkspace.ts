@@ -33,6 +33,8 @@ export function useChatWorkspace(isMobile: boolean) {
   const [loadedConversationIds, setLoadedConversationIds] = useState<Set<string>>(() => new Set())
   const [messagesLoading, setMessagesLoading] = useState(true)
   const [composer, setComposer] = useState('')
+  const [thinkingEnabled, setThinkingEnabled] = useState(false)
+  const [thinkingText, setThinkingText] = useState('')
   const [composerMode, setComposerMode] = useState<ComposerMode>('assistant_message')
   const [toolName, setToolName] = useState('')
   const [toolCallId, setToolCallId] = useState('')
@@ -98,6 +100,23 @@ export function useChatWorkspace(isMobile: boolean) {
       ...prev,
       [conversationId]: value,
     }))
+  }
+
+  function buildAssistantTextWithThinking(answerText: string, reasoningText: string) {
+    const normalizedAnswer = answerText.trim()
+    const normalizedReasoning = reasoningText.trim()
+    if (!normalizedReasoning) return normalizedAnswer
+    const thinkingBlock = `<think>
+${normalizedReasoning}
+</think>`
+    return normalizedAnswer ? `${thinkingBlock}
+
+${normalizedAnswer}` : thinkingBlock
+  }
+
+  function clearThinkingInput() {
+    setThinkingEnabled(false)
+    setThinkingText('')
   }
 
   useEffect(() => {
@@ -182,6 +201,7 @@ export function useChatWorkspace(isMobile: boolean) {
       setLoadedConversationIds(new Set())
       setMessagesLoading(false)
       setComposer('')
+      clearThinkingInput()
       setComposerMode('assistant_message')
       setToolName('')
       setToolCallId('')
@@ -211,6 +231,7 @@ export function useChatWorkspace(isMobile: boolean) {
     applySelectedConversation(conversationId)
     if (isMobile) setDrawerOpen(false)
     setComposerMode('assistant_message')
+    clearThinkingInput()
     setToolName('')
     setToolCallId('')
     setToolFormValues({})
@@ -300,8 +321,14 @@ export function useChatWorkspace(isMobile: boolean) {
       await handleSend({ resetMode: true, successMessage: '已输出 Tool Call' })
       return
     }
-    const chunk = composer.trim()
-    if (!chunk) return
+    const reasoningChunk = thinkingEnabled ? thinkingText.trim() : ''
+    const answerChunk = composer.trim()
+    if (!reasoningChunk && !answerChunk) return
+    if (reasoningChunk && draftBuffer.trim()) {
+      appMessage.warning('已有流式输出时不能再在开头插入思考内容')
+      return
+    }
+    const chunk = buildAssistantTextWithThinking(answerChunk, reasoningChunk)
     try {
       const response = await requestJson<{
         draft_text?: string
@@ -318,7 +345,10 @@ export function useChatWorkspace(isMobile: boolean) {
         typeof response.draft_text === 'string' ? response.draft_text : `${draftBuffer}${chunk}`,
       )
       setComposer('')
-      appMessage.success('已输出片段')
+      if (reasoningChunk) {
+        clearThinkingInput()
+      }
+      appMessage.success(reasoningChunk ? '已输出思考片段' : '已输出片段')
     } catch (error) {
       appMessage.error(error instanceof Error ? error.message : '输出片段失败')
     }
@@ -345,8 +375,15 @@ export function useChatWorkspace(isMobile: boolean) {
             }
           })()
     const pendingChunk = composerMode === 'assistant_message' ? composer.trim() : ''
+    const pendingReasoning =
+      composerMode === 'assistant_message' && thinkingEnabled ? thinkingText.trim() : ''
 
-    if (composerMode === 'assistant_message' && !draftBuffer.trim() && !pendingChunk) {
+    if (composerMode === 'assistant_message' && pendingReasoning && draftBuffer.trim()) {
+      appMessage.warning('已有流式输出时不能再在开头插入思考内容')
+      return
+    }
+
+    if (composerMode === 'assistant_message' && !draftBuffer.trim() && !pendingChunk && !pendingReasoning) {
       return
     }
 
@@ -356,14 +393,15 @@ export function useChatWorkspace(isMobile: boolean) {
 
     setSending(true)
     try {
-      if (composerMode === 'assistant_message' && pendingChunk) {
+      if (composerMode === 'assistant_message' && (pendingChunk || pendingReasoning)) {
+        const outputChunk = buildAssistantTextWithThinking(pendingChunk, pendingReasoning)
         const draftResponse = await requestJson<{
           draft_text?: string
           draft_length: number
         }>('/api/chat/output/delta', {
           method: 'POST',
           body: JSON.stringify({
-            text: pendingChunk,
+            text: outputChunk,
             conversation_id: selectedConversationId || undefined,
           }),
         })
@@ -371,7 +409,7 @@ export function useChatWorkspace(isMobile: boolean) {
           selectedConversationId,
           typeof draftResponse.draft_text === 'string'
             ? draftResponse.draft_text
-            : `${draftBuffer}${pendingChunk}`,
+            : `${draftBuffer}${outputChunk}`,
         )
       }
 
@@ -393,6 +431,9 @@ export function useChatWorkspace(isMobile: boolean) {
         applySelectedConversation(nextConversationId)
       }
       setComposer('')
+      if (composerMode === 'assistant_message' && pendingReasoning) {
+        clearThinkingInput()
+      }
       if (options?.resetMode !== false) {
         setComposerMode('assistant_message')
       }
@@ -431,6 +472,8 @@ export function useChatWorkspace(isMobile: boolean) {
     chatScrollRef,
     composer,
     composerMode,
+    thinkingEnabled,
+    thinkingText,
     conversations,
     deletingConversationId,
     draftBuffer,
@@ -469,6 +512,8 @@ export function useChatWorkspace(isMobile: boolean) {
     setAbortReason,
     setComposer,
     setComposerMode,
+    setThinkingEnabled,
+    setThinkingText,
     setDrawerOpen,
     setEditingAutomationRule: automation.setEditingAutomationRule,
     setPruneKeepCount,

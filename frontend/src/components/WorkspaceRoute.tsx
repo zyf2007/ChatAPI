@@ -190,9 +190,13 @@ export function WorkspaceRoute() {
             sending={workspace.sending}
             setComposer={workspace.setComposer}
             setComposerMode={workspace.setComposerMode}
+            setThinkingEnabled={workspace.setThinkingEnabled}
+            setThinkingText={workspace.setThinkingText}
             setToolCallId={workspace.setToolCallId}
             setToolFormValues={workspace.setToolFormValues}
             setToolName={workspace.setToolName}
+            thinkingEnabled={workspace.thinkingEnabled}
+            thinkingText={workspace.thinkingText}
             toolCallId={workspace.toolCallId}
             toolFormValues={workspace.toolFormValues}
             toolName={workspace.toolName}
