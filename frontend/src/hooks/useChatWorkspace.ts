@@ -408,14 +408,30 @@ export function useChatWorkspace(isMobile: boolean) {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Enter' || event.shiftKey) return
+    if (event.key !== 'Enter') return
+
+    if (event.altKey) {
+      event.preventDefault()
+      if (sending || !isWaitingForUser || composerMode !== 'assistant_message' || !draftBuffer) {
+        return
+      }
+      setComposer(`${draftBuffer}${composer}`)
+      return
+    }
+
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault()
+      if (sending || !isWaitingForUser || composerMode !== 'assistant_message') {
+        return
+      }
+      void handleSend()
+      return
+    }
+
+    if (event.shiftKey) return
+
     event.preventDefault()
-    if (
-      sending ||
-      !isWaitingForUser ||
-      composerMode !== 'assistant_message' ||
-      !composer.trim()
-    ) {
+    if (sending || !isWaitingForUser || composerMode !== 'assistant_message' || !composer.trim()) {
       return
     }
     void handleDraft()
