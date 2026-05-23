@@ -1,4 +1,5 @@
 # ChatAPI
+适用于手机Termux
 [[Telegram](https://t.me/hutao_space)] |  [[LinuxDO](https://linux.do/u/hutao)] | [[BiliBili](https://www.bilibili.com/video/BV11PLg6LEbB)]  
 本项目是一个让 各类 AI 客户端用 OpenAI Responses 风格接口调用人类的项目，并带有一个 Web 控制台界面，可以帮你组装 Tool Calling 请求，或设置自动回复规则。  
 通过这个项目，你可以让别人把你配置到 Agent 或 聊天机器人中，然后自己扮演 AI 助手被调用。
@@ -18,63 +19,32 @@
 
 ## 1. 部署
 ### 无需 Nginx 一键部署
+#### 准备
+```bash
+pkg update
+pkg install -y libjpeg-turbo libpng freetype harfbuzz libtiff libwebp openjpeg
+pkg install nodejs
+npm install -g typescript
+#还有问题就去问AI先(如:DeepSeek)
+```
 #### 构建前端
 
 ```bash
-cd ./frontend
+cd ~/
+git clone https://github.com/zyf2007/ChatAPI.git
+cd ~/ChatAPI/frontend
 npm i
 npm run build
 ```
 
 首页默认显示当前访问来源作为 API 基址；如需在构建时指定其他基址，可在构建前设置 `VITE_HOMEPAGE_API_BASE_URL`。
 
-#### 设置.env
-```env
-CHATAPI_USERNAME=用户名
-CHATAPI_PASSWORD=密码
-# 可选；如果不填，后端会在首次启动时自动生成并写入数据库配置表
-# CHATAPI_SESSION_SECRET=随机字符串
-
-CHATAPI_DB_PATH=./data/chatapi.sqlite3
-CHATAPI_DATA_DIR=./data
-
-CHATAPI_HOST=0.0.0.0
-CHATAPI_PORT=443
-CHATAPI_WEB_DIST_DIR=../frontend/dist
-CHATAPI_TLS_CERT_FILE=../certs/server.crt
-CHATAPI_TLS_KEY_FILE=../certs/server.key
-```
-
-#### 启动Flask
-
-```bash
-cd ./backend
-uv sync
-uv run main.py
-```
-### dev部署
-
-#### 后动后端
-
-```bash
-cd ./backend
-uv sync
-uv run main.py
-```
-
-#### 启动前端
-
-```bash
-cd ./frontend
-npm i
-npm run dev
-```
-
-## 3. 配置环境变量
+## 2. 配置环境变量
 
 先复制配置模板：
 
 ```bash
+cd ~/ChatAPI/backend
 cp .env.example .env
 ```
 
@@ -127,6 +97,23 @@ CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 # CHATAPI_TENCENTCLOUD_SES_REGION=ap-guangzhou
 # 普通 SES 账号还需要模板 ID；模板数据会由程序动态生成。
 # CHATAPI_TENCENTCLOUD_TEMPLATE_ID=100091
+```
+
+#### 启动后端
+
+```bash
+cd ~/ChatAPI/backend
+pkg install uv #如果没有的话
+uv sync
+uv run main.py
+```
+
+#### 启动前端
+
+```bash
+cd ~/ChatAPI/frontend
+npm i
+npm run dev
 ```
 
 ## 4. Nginx 反向代理示例
