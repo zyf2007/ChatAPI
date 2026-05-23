@@ -4,6 +4,7 @@ from flask import Flask, abort, jsonify, request
 
 from ..core import AppDependencies
 from ..services.email import get_available_email_providers, resolve_email_provider
+from ..services.realtime import ConnectionLimitExceeded, ConnectionLease, RealtimeBroker
 from ..services.response_stream import (
     client_disconnected,
     discard_pending_turn,
@@ -32,6 +33,20 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
         publish_sync=publish_sync,
     )
 
+    def stream_limit_error():
+        return (
+            jsonify(
+                {
+                    "error": {
+                        "message": "connection limit exceeded",
+                        "type": "connection_limit_exceeded",
+                        "code": "connection_limit_exceeded",
+                    }
+                }
+            ),
+            429,
+        )
+
     def handle_protocol_request(data: dict[str, object], request_format: str):
         prepared = coordinator.prepare_pending_turn(data, request_format)
         if isinstance(prepared, tuple):
@@ -41,6 +56,29 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
         assert isinstance(prepared, PreparedTurn)
         pending = prepared.pending
         if bool(data.get("stream")):
+            lease: ConnectionLease | None = None
+            if isinstance(realtime, RealtimeBroker):
+                try:
+                    lease = realtime.acquire_connection(
+                        pending.owner_id,
+                        kind=f"sse:{request_format}",
+                        max_connections=system_config_store.get_system_config(
+                            "value.realtime_max_connections",
+                            "0",
+                        ),
+                        max_connections_per_user=system_config_store.get_system_config(
+                            "value.realtime_max_connections_per_user",
+                            "0",
+                        ),
+                    )
+                except ConnectionLimitExceeded:
+                    discard_pending_turn(
+                        pending,
+                        pending_turns=deps.pending_turns,
+                        store=deps.store,
+                        publish_sync=publish_sync,
+                    )
+                    return stream_limit_error()
             stream_kwargs = {
                 "pending": pending,
                 "pending_turns": deps.pending_turns,
@@ -48,6 +86,8 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
                 "build_abort_error": coordinator.build_abort_error,
                 "client_socket": request.environ.get("werkzeug.socket"),
                 "publish_sync": publish_sync,
+                "connection_lease": lease,
+                "realtime": realtime if isinstance(realtime, RealtimeBroker) else None,
             }
             if request_format == "chat_completions":
                 return stream_chat_completion_turn(**stream_kwargs)

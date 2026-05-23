@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import queue
 import threading
-from typing import Any
+import uuid
+from typing import Any, Callable
 
 from ..repositories import ConversationStore, UserStore
 
@@ -15,12 +16,32 @@ class RealtimeSubscription:
     closed: threading.Event = field(default_factory=threading.Event)
 
 
+@dataclass
+class ActiveConnection:
+    connection_id: str
+    owner_id: str
+    kind: str
+    close_callback: Callable[[], None] | None = None
+
+
+@dataclass(frozen=True)
+class ConnectionLease:
+    connection_id: str
+    owner_id: str
+    kind: str
+
+
+class ConnectionLimitExceeded(RuntimeError):
+    pass
+
+
 class RealtimeBroker:
     def __init__(self, store: ConversationStore, user_store: UserStore):
         self._store = store
         self._user_store = user_store
         self._lock = threading.Lock()
         self._subscriptions_by_owner: dict[str, list[RealtimeSubscription]] = {}
+        self._connections_by_owner: dict[str, list[ActiveConnection]] = {}
 
     @staticmethod
     def _normalize_limit(value: Any, default: int = 0) -> int:
@@ -28,6 +49,43 @@ class RealtimeBroker:
             return max(0, int(value or default))
         except (TypeError, ValueError):
             return default
+
+    def acquire_connection(
+        self,
+        owner_id: str,
+        *,
+        kind: str,
+        max_connections: int = 0,
+        max_connections_per_user: int = 0,
+        close_callback: Callable[[], None] | None = None,
+    ) -> ConnectionLease:
+        connection = ActiveConnection(
+            connection_id=uuid.uuid4().hex,
+            owner_id=owner_id,
+            kind=kind,
+            close_callback=close_callback,
+        )
+        affected_owners: set[str] = set()
+        with self._lock:
+            affected_owners |= self._enforce_limits_locked(
+                owner_id,
+                max_connections=max_connections,
+                max_connections_per_user=max_connections_per_user,
+            )
+            if self._would_exceed_limits_locked(
+                owner_id,
+                max_connections=max_connections,
+                max_connections_per_user=max_connections_per_user,
+            ):
+                raise ConnectionLimitExceeded("connection limit exceeded")
+            self._connections_by_owner.setdefault(owner_id, []).append(connection)
+            affected_owners.add(owner_id)
+        self._publish_connection_counts(affected_owners)
+        return ConnectionLease(
+            connection_id=connection.connection_id,
+            owner_id=owner_id,
+            kind=kind,
+        )
 
     def subscribe(
         self,
@@ -42,17 +100,17 @@ class RealtimeBroker:
             owner_id=owner_id,
             events=queue.Queue(maxsize=queue_size),
         )
-        affected_owners: set[str] = set()
+        lease = self.acquire_connection(
+            owner_id,
+            kind="websocket",
+            max_connections=max_connections,
+            max_connections_per_user=max_connections_per_user,
+            close_callback=subscription.closed.set,
+        )
+        setattr(subscription, "_connection_lease", lease)
         with self._lock:
-            affected_owners |= self._enforce_limits_locked(
-                owner_id,
-                max_connections=max_connections,
-                max_connections_per_user=max_connections_per_user,
-            )
             subscribers = self._subscriptions_by_owner.setdefault(owner_id, [])
             subscribers.append(subscription)
-            affected_owners.add(owner_id)
-        self._publish_connection_counts(affected_owners)
         return subscription
 
     def _enforce_limits_locked(
@@ -67,42 +125,83 @@ class RealtimeBroker:
         max_connections_per_user = self._normalize_limit(max_connections_per_user)
 
         if max_connections_per_user > 0:
-            subscribers = self._subscriptions_by_owner.get(owner_id, [])
-            while len(subscribers) >= max_connections_per_user:
-                oldest = subscribers.pop(0)
-                affected_owners.add(owner_id)
-                oldest.closed.set()
-                self._force_event(oldest, {"type": "disconnect", "reason": "connection_limit"})
-            if subscribers:
-                self._subscriptions_by_owner[owner_id] = subscribers
-            else:
-                self._subscriptions_by_owner.pop(owner_id, None)
+            while self._owner_connection_count_locked(owner_id) >= max_connections_per_user:
+                removed = self._drop_oldest_connection_locked(owner_id=owner_id)
+                if removed is None:
+                    break
+                affected_owners.add(removed.owner_id)
 
         if max_connections <= 0:
             return affected_owners
         while self._connection_count_locked() >= max_connections:
-            oldest_owner = ""
-            oldest_subscription: RealtimeSubscription | None = None
-            for candidate_owner, subscribers in self._subscriptions_by_owner.items():
-                if subscribers:
-                    oldest_owner = candidate_owner
-                    oldest_subscription = subscribers[0]
-                    break
-            if oldest_subscription is None:
+            removed = self._drop_oldest_connection_locked()
+            if removed is None:
                 return affected_owners
-            self._subscriptions_by_owner[oldest_owner].pop(0)
-            if not self._subscriptions_by_owner[oldest_owner]:
-                self._subscriptions_by_owner.pop(oldest_owner, None)
-            affected_owners.add(oldest_owner)
-            oldest_subscription.closed.set()
-            self._force_event(oldest_subscription, {"type": "disconnect", "reason": "connection_limit"})
+            affected_owners.add(removed.owner_id)
         return affected_owners
 
     def _connection_count_locked(self) -> int:
-        return sum(len(items) for items in self._subscriptions_by_owner.values())
+        return sum(len(items) for items in self._connections_by_owner.values())
+
+    def _owner_connection_count_locked(self, owner_id: str) -> int:
+        return len(self._connections_by_owner.get(owner_id, ()))
+
+    def _would_exceed_limits_locked(
+        self,
+        owner_id: str,
+        *,
+        max_connections: int,
+        max_connections_per_user: int,
+    ) -> bool:
+        max_connections = self._normalize_limit(max_connections)
+        max_connections_per_user = self._normalize_limit(max_connections_per_user)
+        if max_connections_per_user > 0 and self._owner_connection_count_locked(owner_id) >= max_connections_per_user:
+            return True
+        if max_connections > 0 and self._connection_count_locked() >= max_connections:
+            return True
+        return False
+
+    def _drop_oldest_connection_locked(self, owner_id: str | None = None) -> ActiveConnection | None:
+        candidate_owners = [owner_id] if owner_id is not None else list(self._connections_by_owner.keys())
+        for candidate_owner in candidate_owners:
+            connections = self._connections_by_owner.get(candidate_owner, [])
+            for index, connection in enumerate(connections):
+                if connection.close_callback is None:
+                    continue
+                connections.pop(index)
+                if connections:
+                    self._connections_by_owner[candidate_owner] = connections
+                else:
+                    self._connections_by_owner.pop(candidate_owner, None)
+                self._close_connection_locked(connection)
+                return connection
+        return None
+
+    def _close_connection_locked(self, connection: ActiveConnection) -> None:
+        self._remove_subscription_for_connection_locked(connection.connection_id)
+        if connection.close_callback is not None:
+            connection.close_callback()
+
+    def _remove_subscription_for_connection_locked(self, connection_id: str) -> None:
+        for owner_id, subscribers in list(self._subscriptions_by_owner.items()):
+            remaining = [
+                subscription
+                for subscription in subscribers
+                if getattr(getattr(subscription, "_connection_lease", None), "connection_id", None) != connection_id
+            ]
+            if len(remaining) == len(subscribers):
+                continue
+            if remaining:
+                self._subscriptions_by_owner[owner_id] = remaining
+            else:
+                self._subscriptions_by_owner.pop(owner_id, None)
+            return
 
     def unsubscribe(self, subscription: RealtimeSubscription) -> None:
-        affected_owner: str | None = None
+        lease = getattr(subscription, "_connection_lease", None)
+        if isinstance(lease, ConnectionLease):
+            self.release_connection(lease)
+            return
         with self._lock:
             subscribers = self._subscriptions_by_owner.get(subscription.owner_id)
             if not subscribers:
@@ -110,15 +209,30 @@ class RealtimeBroker:
             self._subscriptions_by_owner[subscription.owner_id] = [
                 item for item in subscribers if item is not subscription
             ]
-            affected_owner = subscription.owner_id
             if not self._subscriptions_by_owner[subscription.owner_id]:
                 self._subscriptions_by_owner.pop(subscription.owner_id, None)
+
+    def release_connection(self, lease: ConnectionLease) -> None:
+        affected_owner: str | None = None
+        with self._lock:
+            connections = self._connections_by_owner.get(lease.owner_id)
+            if not connections:
+                return
+            remaining = [item for item in connections if item.connection_id != lease.connection_id]
+            if len(remaining) == len(connections):
+                return
+            affected_owner = lease.owner_id
+            if remaining:
+                self._connections_by_owner[lease.owner_id] = remaining
+            else:
+                self._connections_by_owner.pop(lease.owner_id, None)
+            self._remove_subscription_for_connection_locked(lease.connection_id)
         if affected_owner is not None:
             self._publish_connection_counts({affected_owner})
 
     def count_owner_connections(self, owner_id: str) -> int:
         with self._lock:
-            return len(self._subscriptions_by_owner.get(owner_id, ()))
+            return self._owner_connection_count_locked(owner_id)
 
     def count_connections(self) -> int:
         with self._lock:

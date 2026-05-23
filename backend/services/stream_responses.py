@@ -8,6 +8,7 @@ from flask import stream_with_context
 
 from .pending import PendingTurn, PendingTurnRegistry
 from .response_payloads import build_openai_response, estimate_usage
+from .realtime import ConnectionLease, RealtimeBroker
 from .stream_common import (
     build_stream_response,
     client_disconnected,
@@ -52,6 +53,8 @@ def stream_pending_turn(
     build_abort_error: Callable[[str], tuple[dict[str, Any], int]],
     client_socket: Any,
     publish_sync: Callable[[str, str | None], None] | None = None,
+    connection_lease: ConnectionLease | None = None,
+    realtime: RealtimeBroker | None = None,
 ):
     def generate():
         sequence = 0
@@ -504,5 +507,8 @@ def stream_pending_turn(
                 publish_sync=publish_sync,
             )
             raise
+        finally:
+            if connection_lease is not None and realtime is not None:
+                realtime.release_connection(connection_lease)
 
     return build_stream_response(stream_with_context(generate()))
