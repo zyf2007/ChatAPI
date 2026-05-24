@@ -131,18 +131,18 @@ CHATAPI_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 # 基于手机端Termux的部署方案
 ## 1.注意事项
-注意:请确保您的系统正常,并且使用了在Github或F-Droid下载的Termux或者国内打包版本ZeroTermux,请确保系统应当为64位(Arm64或aarch64)
-以保证能正常运行和部署,通过以下命令可以查询自己设备的架构,为了更好更方便的管理,可以使用文件管理器,如MT管理器,遇到问题可以先将项目更新到最新版本
+注意:请确保您的系统正常,并且使用了在Github或F-Droid下载的[[Termux](https://github.com/termux/termux-app/releases)]或者国内打包版本[[ZeroTermux](https://github.com/hanxinhao000/ZeroTermux/releases)],请确保系统应当为64位(Arm64或aarch64)
+以保证能正常运行和部署,通过以下命令可以查询自己设备的架构,为了更好更方便的管理,可以使用文件管理器,如[[MT管理器](https://mt2.cn/download/)],遇到问题可以先将项目更新到最新版本
 或者询问AI,询问他人,为了避免豆包的疑惑行为,可以使用其他ai(如:DeepSeek,Qwen[千问]),如果遇到实在的bug请报告给创作者
 ```bash
 uname -m
 ```
 输出数据根据以下查看,应当输出aarch64才满足条件
-aarch64 说明:64位 ARM（ARMv8-A 或更高）
-armv7l 或 armv8l 说明:32位 ARM（ARMv7-A 或兼容）
-x86_64 说明:64位 x86 架构（Intel/AMD）
-i686 或 i386 说明:32位 x86 架构
-riscv64 说明:RISC-V 64位架构
+###### aarch64 说明:64位 ARM（ARMv8-A 或更高）
+###### armv7l 或 armv8l 说明:32位 ARM（ARMv7-A 或兼容）
+###### x86_64 说明:64位 x86 架构（Intel/AMD）
+###### i686 或 i386 说明:32位 x86 架构
+###### riscv64 说明:RISC-V 64位架构
 至少Android 5以上,最好Android 12以上
 
 注意:本项目本身还是基于电脑端的没有手机端的优化支持,但目前还是可以在手机端上运行的,还有请确保您已更新termux的相关文件已更新最新
@@ -167,7 +167,7 @@ node --version && npm --version #验证一下安装
 
 ```bash
 cd ~/
-git clone https://github.com/zyf2007/ChatAPI.git
+git clone https://github.com/zyf2007/ChatAPI.git #Github无法正确访问下载,请看下[其他所需]
 cd ChatAPI
 cd frontend
 npm i
@@ -340,23 +340,115 @@ tar xzf ngrok-v3-stable-linux-arm64.tgz
 
 ## 8.安全增强建议
 
-##### 8.1账户安全策略
+#### 8.1账户安全策略
 
-1. 修改默认管理员密码：部署后立即修改 CHATAPI_PASSWORD，避免使用弱密码。
-2. 启用 TOTP 两步验证：在 Web 控制台的「系统设置」中启用 TOTP，配合 Google Authenticator 等认证器使用。TOTP 密钥应安全存储在数据库中。
-3. 启用 API Key 认证：为 API 调用启用 Bearer Token 认证，调用时需携带 Authorization: Bearer <api_key> 头。
-```4. 启用消息限流：在系统设置中配置请求限流策略，防止滥用。
+1.修改默认管理员密码：部署后立即修改 CHATAPI_PASSWORD，避免使用弱密码。
 
-4.2 网络安全配置
+2.启用 TOTP 两步验证：在 Web 控制台的「系统设置」中启用 TOTP，配合 Google Authenticator 等认证器使用。TOTP 密钥应安全存储在数据库中。
 
-· 生产环境使用 HTTPS：强烈建议使用 Nginx 反向代理 + Let's Encrypt 免费证书
-· 限制 CORS 来源：仅允许必要的域名，避免使用通配符
-· 配置防火墙：Termux 中可使用 iptables 或 nftables 限制访问来源 IP
+3.启用 API Key 认证：为 API 调用启用 Bearer Token 认证，调用时需携带 Authorization: Bearer <api_key> 头。
 
-4.3 敏感信息管理
+4.启用消息限流：在系统设置中配置请求限流策略，防止滥用。
 
-· 登录后在 Web 控制台启用并保存 API Key、站点标题、ntfy 地址和 TOTP，这些配置不应放在 .env 文件中
-· SESSION_SECRET 若不填写，后端会在首次启动时自动生成并写入数据库配置表
+#### 8.2网络安全配置
+
+1.生产环境使用 HTTPS：强烈建议使用 Nginx 反向代理 + Let's Encrypt 免费证书
+
+2.限制 CORS 来源：仅允许必要的域名，避免使用通配符
+
+3.配置防火墙：Termux 中可使用 iptables 或 nftables 限制访问来源 IP
+
+#### 8.3敏感信息管理
+
+1.登录后在 Web 控制台启用并保存 API Key、站点标题、ntfy 地址和 TOTP，这些配置不应放在 .env 文件中
+
+2.SESSION_SECRET 若不填写，后端会在首次启动时自动生成并写入数据库配置表
+
+
+## Termux常见问题排查
+
+###### Q1：数据库锁错误（database is locked）
+
+原因：SQLite 在高并发写入时可能发生锁冲突。
+
+解决方案：
+
+  1.启用 WAL 模式（?journal_mode=WAL）
+  
+  2.使用连接池限制并发连接数
+  
+  3.将繁忙写入操作包装在事务中
+
+###### Q2：Session Secret 相关错误
+
+原因：未在 .env 中配置 CHATAPI_SESSION_SECRET。
+
+解决方案：留空即可，后端会在首次启动时自动生成并写入数据库配置表。若需手动指定，建议使用高熵随机字符串。
+
+###### Q3：邮件发送失败
+
+检查项：
+
+  1.SMTP 服务器地址和端口是否正确
+  
+  2.是否启用了 SMTP 认证（部分服务商需要）
+  
+  3.发件人邮箱是否经过验证
+  
+  4.使用第三方 API（如 Resend、腾讯云 SES）时，API Key 是否有效且权限正确。Resend 建议权限设置为“仅发送”，以降低泄露风险。
+
+###### Q4：Termux 中 Node.js 构建前端失败
+
+解决方案：
+  1.增加 swap 空间：dd if=/dev/zero of=$PREFIX/swapfile bs=1M count=1024 && chmod 600 $PREFIX/swapfile && mkswap 
+  $PREFIX/swapfile && swapon $PREFIX/swapfile
+  
+  2.使用 npm run build 前确保内存充足（建议 1GB 以上可用 RAM）
+
+## 通过Github下载所需
+默认为最新版本,如果您的设备不支持请自行寻找适配版本下载
+[[ZeroTermux‖0.118.3.58‖全架构](https://github.com/hanxinhao000/ZeroTermux/releases/download/ZeroTermux-0.118.3.58/ZeroTermux-ZeroTermux-0.118.3.58_release_universal.apk)]
+
+[[Termux‖V0.119.0-beta3‖全架构](https://github.com/termux/termux-app/releases/download/v0.119.0-beta.3/termux-app_v0.119.0-beta.3+apt-android-7-github-debug_universal.apk)]
+
+## 通过下载站下载所需
+默认为最新版本,如果您的设备不支持请自行寻找适配版本下载
+使用下载站:[[gh-proxy](https://gh-proxy.com/)],Cloudflare
+### Termux
+[[Termux‖V0.119.0-beta3‖全架构](https://gh-proxy.org/https://github.com/termux/termux-app/releases/download/v0.119.0-beta.3/termux-app_v0.119.0-beta.3+apt-android-7-github-debug_universal.apk)]主站加速，全球高速分发
+
+[[Termux‖V0.119.0-beta3‖全架构](https://v4.gh-proxy.org/https://github.com/termux/termux-app/releases/download/v0.119.0-beta.3/termux-app_v0.119.0-beta.3+apt-android-7-github-debug_universal.apk)]优选加速服务器，仅支持IPv4 网络智能解析
+
+[[Termux‖V0.119.0-beta3‖全架构](https://v6.gh-proxy.org/https://github.com/termux/termux-app/releases/download/v0.119.0-beta.3/termux-app_v0.119.0-beta.3+apt-android-7-github-debug_universal.apk)]优选加速服务器，支持 IPv6/IPv4 网络智能解析
+
+### ZeroTermux
+[[ZeroTermux‖0.118.3.58‖全架构](https://gh-proxy.org/https://github.com/hanxinhao000/ZeroTermux/releases/download/ZeroTermux-0.118.3.58/ZeroTermux-ZeroTermux-0.118.3.58_release_universal.apk)]主站加速，全球高速分发
+
+[[ZeroTermux‖0.118.3.58‖全架构](https://v4.gh-proxy.org/https://github.com/hanxinhao000/ZeroTermux/releases/download/ZeroTermux-0.118.3.58/ZeroTermux-ZeroTermux-0.118.3.58_release_universal.apk)]优选加速服务器，仅支持IPv4 网络智能解析
+
+[[ZeroTermux‖0.118.3.58‖全架构](https://v6.gh-proxy.org/https://github.com/hanxinhao000/ZeroTermux/releases/download/ZeroTermux-0.118.3.58/ZeroTermux-ZeroTermux-0.118.3.58_release_universal.apk)]优选加速服务器，支持 IPv6/IPv4 网络智能解析
+
+## 其他所需
+国内软件使用国内通道,Github相关使用[[下载站](https://gh-proxy.com/)],默认为最新版本,如果您的设备不支持请自行寻找适配版本下载
+### 克隆本项目(下载站)
+##### 主站加速，全球高速分发
+```bash
+git clone https://gh-proxy.org/https://github.com/zyf2007/ChatAPI.git
+```
+##### 优选加速服务器，仅支持IPv4 网络智能解析
+```bash
+git clone https://v4.gh-proxy.org/https://github.com/zyf2007/ChatAPI.git
+```
+##### 优选加速服务器，支持 IPv6/IPv4 网络智能解析
+```bash
+git clone https://v6.gh-proxy.org/https://github.com/zyf2007/ChatAPI.git
+```
+
+### MT管理器
+[[MT管理器](https://pan.mt2.cn/apk/26040964)]
+
+### MT管理器代替版[NP管理器]
+[[NP管理器](http://normalplayer.top:8991/member/view/fileDownload/NP.apk)]
 
 ## Nginx 反向代理示例
 
