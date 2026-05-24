@@ -23,6 +23,7 @@ export function useSystemSettingsState() {
         || config.registration_email_domain_restriction_enabled !== savedConfig.registration_email_domain_restriction_enabled
         || config.registration_email_domains !== savedConfig.registration_email_domains
         || config.api_key_limit_per_user !== savedConfig.api_key_limit_per_user,
+      ntfy: config.ntfy_private_url_policy !== savedConfig.ntfy_private_url_policy,
       realtime:
         config.realtime_max_connections !== savedConfig.realtime_max_connections
         || config.realtime_max_connections_per_user !== savedConfig.realtime_max_connections_per_user

@@ -10,6 +10,7 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   email_provider_options: [],
   registration_email_domain_restriction_enabled: false,
   registration_email_domains: '',
+  ntfy_private_url_policy: 'disabled',
   api_key_limit_per_user: 0,
   realtime_max_connections: 0,
   realtime_max_connections_per_user: 0,
@@ -43,6 +44,7 @@ export function normalizeSystemConfig(data: Partial<SystemConfig> & { ok?: boole
       : [],
     registration_email_domain_restriction_enabled: Boolean(data.registration_email_domain_restriction_enabled),
     registration_email_domains: String(data.registration_email_domains ?? ''),
+    ntfy_private_url_policy: normalizeNtfyPrivateUrlPolicy(data.ntfy_private_url_policy),
     api_key_limit_per_user: Number(data.api_key_limit_per_user ?? 0),
     realtime_max_connections: Number(data.realtime_max_connections ?? 0),
     realtime_max_connections_per_user: Number(data.realtime_max_connections_per_user ?? 0),
@@ -64,6 +66,11 @@ export function normalizeSystemConfig(data: Partial<SystemConfig> & { ok?: boole
   }
 
   return nextConfig
+}
+
+export function normalizeNtfyPrivateUrlPolicy(value: unknown): SystemConfig['ntfy_private_url_policy'] {
+  if (value === 'admin' || value === 'all') return value
+  return 'disabled'
 }
 
 export function isRegistrationEmailDomainError(message: string) {

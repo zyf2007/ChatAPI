@@ -3,10 +3,17 @@ from __future__ import annotations
 from flask import Flask, jsonify, request
 
 from ..core import AuthContext
-from ..repositories import UserStore
+from ..repositories import SystemConfigStore, UserStore
+from ..services.url_safety import validate_public_http_url
 
 
-def register_user_config_routes(app: Flask, *, auth: AuthContext, user_store: UserStore) -> None:
+def register_user_config_routes(
+    app: Flask,
+    *,
+    auth: AuthContext,
+    user_store: UserStore,
+    system_config_store: SystemConfigStore,
+) -> None:
 
     @app.get("/api/user/config")
     @auth.require_session_auth
@@ -25,7 +32,15 @@ def register_user_config_routes(app: Flask, *, auth: AuthContext, user_store: Us
             return jsonify({"error": "request body must be a JSON object"}), 400
 
         owner_id = auth.owner_id()
+        current_user = auth.current_user()
         try:
+            if bool(data.get("ntfy_url_enabled")):
+                allow_private = system_config_store.is_ntfy_private_url_allowed_for_role(
+                    str((current_user or {}).get("role", "")),
+                )
+                safety = validate_public_http_url(str(data.get("ntfy_url", "")), allow_private=allow_private)
+                if not safety.ok:
+                    return jsonify({"error": safety.reason or "ntfy 地址不安全"}), 400
             user_store.update_user_config_snapshot(owner_id, data)
         except ValueError as error:
             return jsonify({"error": str(error)}), 400

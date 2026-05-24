@@ -110,6 +110,22 @@ class SystemConfigStore:
         _, domain = email.rsplit("@", 1)
         return domain.strip().lower() in domains
 
+    def _normalize_ntfy_private_url_policy(self, raw: str) -> str:
+        value = str(raw or "").strip().lower()
+        if value in {"admin", "all"}:
+            return value
+        return "disabled"
+
+    def is_ntfy_private_url_allowed_for_role(self, role: str) -> bool:
+        policy = self._normalize_ntfy_private_url_policy(
+            self.get_system_config("value.ntfy_private_url_policy", "disabled"),
+        )
+        if policy == "all":
+            return True
+        if policy == "admin":
+            return str(role or "").strip() == "admin"
+        return False
+
     def get_system_config_snapshot(self) -> dict[str, Any]:
         api_key_limit_raw = self.get_system_config("value.api_key_limit_per_user", "0").strip()
         try:
@@ -140,6 +156,9 @@ class SystemConfigStore:
                 False,
             ),
             "registration_email_domains": self.get_system_config("value.registration_email_domains", ""),
+            "ntfy_private_url_policy": self._normalize_ntfy_private_url_policy(
+                self.get_system_config("value.ntfy_private_url_policy", "disabled"),
+            ),
             "api_key_limit_per_user": api_key_limit_per_user,
             "realtime_max_connections": realtime_max_connections,
             "realtime_max_connections_per_user": realtime_max_connections_per_user,
@@ -234,6 +253,10 @@ class SystemConfigStore:
         self.set_system_config(
             "value.registration_email_domains",
             registration_email_domains,
+        )
+        self.set_system_config(
+            "value.ntfy_private_url_policy",
+            self._normalize_ntfy_private_url_policy(str(data.get("ntfy_private_url_policy", "disabled"))),
         )
         self.set_system_config(
             "value.api_key_limit_per_user",

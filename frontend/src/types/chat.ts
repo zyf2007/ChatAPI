@@ -216,6 +216,7 @@ export type SystemConfig = {
   }>
   registration_email_domain_restriction_enabled: boolean
   registration_email_domains: string
+  ntfy_private_url_policy: 'disabled' | 'admin' | 'all'
   api_key_limit_per_user: number
   realtime_max_connections: number
   realtime_max_connections_per_user: number

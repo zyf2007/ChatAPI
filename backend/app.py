@@ -95,7 +95,12 @@ def create_app() -> Flask:
         user_store=user_store,
     )
     register_admin_routes(app, auth=auth, store=store, user_store=user_store)
-    register_user_config_routes(app, auth=auth, user_store=user_store)
+    register_user_config_routes(
+        app,
+        auth=auth,
+        user_store=user_store,
+        system_config_store=system_config_store,
+    )
     register_user_api_key_routes(app, auth=auth, user_store=user_store)
     register_conversation_routes(app, deps=deps)
     register_realtime_routes(app, deps=deps)

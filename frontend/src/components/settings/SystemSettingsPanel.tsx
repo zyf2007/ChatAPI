@@ -150,6 +150,25 @@ export function SystemSettingsPanel({ open, onClose }: SystemSettingsPanelProps)
         </div>
 
         <div className="system-settings-row">
+          <Typography.Text className="system-settings-row-title">消息推送地址</Typography.Text>
+          <div className="system-settings-row-body">
+            <Typography.Text className="system-settings-row-help system-settings-row-help-visible">
+              一般保持关闭；仅在自建 ntfy 位于本机或内网时开启。
+            </Typography.Text>
+          </div>
+          <Select
+            value={config.ntfy_private_url_policy}
+            options={[
+              { value: 'disabled', label: '关闭' },
+              { value: 'admin', label: '仅管理员' },
+              { value: 'all', label: '所有用户' },
+            ]}
+            style={{ width: 120 }}
+            onChange={(value) => updateSection('ntfy_private_url_policy', value)}
+          />
+        </div>
+
+        <div className="system-settings-row">
           <Typography.Text className="system-settings-row-title">测试邮件</Typography.Text>
           <div className="system-settings-row-body">
             <Typography.Text className="system-settings-row-help">
