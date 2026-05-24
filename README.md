@@ -251,6 +251,110 @@ cd ~/ChatAPI/frontend
 npm i
 npm run dev
 ```
+## 6.Termux 专用服务管理方案
+
+#### 方案一：使用 tmux 管理多会话（推荐）
+
+##### 安装 tmux
+```bash
+pkg install tmux -y
+```
+
+##### 创建后端会话
+```bash
+tmux new -s chatapi-backend
+cd ~/ChatAPI/backend
+uv run main.py
+```
+Ctrl+B, D 分离会话
+
+##### 创建前端会话
+```bash
+tmux new -s chatapi-frontend
+cd ~/ChatAPI/frontend
+npm run dev -- --host 0.0.0.0
+```
+Ctrl+B, D 分离会话
+
+##### 查看运行中会话
+```bash
+tmux ls
+```
+
+##### 重新附着会话
+```bash
+tmux attach -t chatapi-backend
+```
+
+#### 方案二：使用 nohup 后台运行
+
+##### 后端
+```bash
+cd ~/ChatAPI/backend
+nohup uv run main.py > backend.log 2>&1 &
+```
+
+##### 前端
+```bash
+cd ~/ChatAPI/frontend
+nohup npm run dev -- --host 0.0.0.0 > frontend.log 2>&1 &
+```
+
+#### 开机自启（需安装 Termux:Boot 插件）
+
+1. 安装 Termux:Boot 插件/[(ZT)Termux:Boot]
+2. 创建自启脚本 ~/.termux/boot/start-chatapi.sh：
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+cd ~/ChatAPI/backend
+nohup uv run main.py > backend.log 2>&1 &
+sleep 3
+cd ~/ChatAPI/frontend
+nohup npm run dev -- --host 0.0.0.0 > frontend.log 2>&1 &
+```
+
+赋予执行权限：
+```bash
+chmod +x ~/.termux/boot/start-chatapi.sh
+```
+
+3.4 公网访问方案
+
+Termux 中的服务通常运行在局域网中，如需公网访问，可使用以下内网穿透工具：
+
+```bash
+# 使用 cloudflared（Cloudflare Tunnel）
+pkg install cloudflared -y
+cloudflared tunnel --url http://localhost:5000
+
+# 或使用 ngrok（需要注册获取 token）
+pkg install wget -y
+wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz
+tar xzf ngrok-v3-stable-linux-arm64.tgz
+./ngrok config add-authtoken YOUR_TOKEN
+./ngrok http 5000
+```
+
+四、安全增强建议
+
+4.1 账户安全策略
+
+1. 修改默认管理员密码：部署后立即修改 CHATAPI_PASSWORD，避免使用弱密码。
+2. 启用 TOTP 两步验证：在 Web 控制台的「系统设置」中启用 TOTP，配合 Google Authenticator 等认证器使用。TOTP 密钥应安全存储在数据库中。
+3. 启用 API Key 认证：为 API 调用启用 Bearer Token 认证，调用时需携带 Authorization: Bearer <api_key> 头。
+4. 启用消息限流：在系统设置中配置请求限流策略，防止滥用。
+
+4.2 网络安全配置
+
+· 生产环境使用 HTTPS：强烈建议使用 Nginx 反向代理 + Let's Encrypt 免费证书
+· 限制 CORS 来源：仅允许必要的域名，避免使用通配符
+· 配置防火墙：Termux 中可使用 iptables 或 nftables 限制访问来源 IP
+
+4.3 敏感信息管理
+
+· 登录后在 Web 控制台启用并保存 API Key、站点标题、ntfy 地址和 TOTP，这些配置不应放在 .env 文件中
+· SESSION_SECRET 若不填写，后端会在首次启动时自动生成并写入数据库配置表
 
 ## Nginx 反向代理示例
 
