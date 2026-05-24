@@ -15,4 +15,5 @@ dependencies = [
     "sib-api-v3-sdk>=7.6.0",
     "tencentcloud-sdk-python>=3.0.0",
     "gunicorn>=26.0.0",
+    "regex>=2024.11.6",
 ]

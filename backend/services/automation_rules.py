@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-import re
+import regex
 import threading
 import time
 import uuid
@@ -12,6 +12,9 @@ from .output_controller import TurnOutputController
 from .pending import PendingTurn
 
 LEGACY_HEARTBEAT_RULE_ID = "legacy-heartbeat"
+REGEX_MATCH_TIMEOUT_SECONDS = 0.1
+REGEX_MAX_PATTERN_LENGTH = 512
+
 
 
 def _as_string_list(value: Any) -> list[str]:
@@ -91,9 +94,11 @@ def _match_pattern(item: dict[str, str], input_text: str) -> bool:
     if not pattern:
         return False
     if match_type == "regex":
+        if len(pattern) > REGEX_MAX_PATTERN_LENGTH:
+            return False
         try:
-            return re.search(pattern, input_text) is not None
-        except re.error:
+            return regex.search(pattern, input_text, timeout=REGEX_MATCH_TIMEOUT_SECONDS) is not None
+        except (regex.error, TimeoutError):
             return False
     return pattern in input_text
 
@@ -172,9 +177,11 @@ def validate_rule_payload(raw_rule: dict[str, Any]) -> tuple[dict[str, Any] | No
             if not pattern:
                 return None, "condition pattern is required"
             if match_type == "regex":
+                if len(pattern) > REGEX_MAX_PATTERN_LENGTH:
+                    return None, f"condition regex pattern is too long, max {REGEX_MAX_PATTERN_LENGTH} characters"
                 try:
-                    re.compile(pattern)
-                except re.error as error:
+                    regex.compile(pattern)
+                except regex.error as error:
                     return None, f"invalid regex: {error}"
     action_type = normalized["action"]["type"]
     if action_type not in {"output_text", "complete", "error", "tool_call"}:
