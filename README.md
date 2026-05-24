@@ -1,4 +1,6 @@
 # ChatAPI
+[English](EN-README.md) | [简体中文](README.md) | [繁體中文](Zh-Hant-README.md)
+
 [[Telegram](https://t.me/hutao_space)] |  [[LinuxDO](https://linux.do/u/hutao)] | [[BiliBili](https://www.bilibili.com/video/BV11PLg6LEbB)]  
 本项目是一个让 各类 AI 客户端用 OpenAI Responses 风格接口调用人类的项目，并带有一个 Web 控制台界面，可以帮你组装 Tool Calling 请求，或设置自动回复规则。  
 通过这个项目，你可以让别人把你配置到 Agent 或 聊天机器人中，然后自己扮演 AI 助手被调用。
@@ -167,13 +169,13 @@ node --version && npm --version #验证一下安装
 
 ```bash
 cd ~/
-git clone https://github.com/zyf2007/ChatAPI.git #Github无法正确访问下载,请看下[其他所需]
+git clone https://github.com/zyf2007/ChatAPI.git
 cd ChatAPI
 cd frontend
 npm i
 npm run build
 ```
-
+无法正确访问到Github,请看[[其他所需](https://github.com/MN-LKs/ChatAPI/edit/patch-1/README.md?pr=/zyf2007/ChatAPI/pull/17#%E5%85%B6%E4%BB%96%E6%89%80%E9%9C%80)]
 首页默认显示当前访问来源作为 API 基址；如需在构建时指定其他基址，可在构建前设置 `VITE_HOMEPAGE_API_BASE_URL`。
 
 ## 4. 配置环境变量
