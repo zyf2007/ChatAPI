@@ -319,16 +319,18 @@ nohup npm run dev -- --host 0.0.0.0 > frontend.log 2>&1 &
 chmod +x ~/.termux/boot/start-chatapi.sh
 ```
 
-3.4 公网访问方案
+## 7.公网访问方案
 
 Termux 中的服务通常运行在局域网中，如需公网访问，可使用以下内网穿透工具：
 
+##### 使用 cloudflared（Cloudflare Tunnel）
 ```bash
-# 使用 cloudflared（Cloudflare Tunnel）
 pkg install cloudflared -y
 cloudflared tunnel --url http://localhost:5000
+```
 
-# 或使用 ngrok（需要注册获取 token）
+##### 或使用 ngrok（需要注册获取 token）
+```bash
 pkg install wget -y
 wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz
 tar xzf ngrok-v3-stable-linux-arm64.tgz
@@ -336,14 +338,14 @@ tar xzf ngrok-v3-stable-linux-arm64.tgz
 ./ngrok http 5000
 ```
 
-四、安全增强建议
+## 8.安全增强建议
 
-4.1 账户安全策略
+##### 8.1账户安全策略
 
 1. 修改默认管理员密码：部署后立即修改 CHATAPI_PASSWORD，避免使用弱密码。
 2. 启用 TOTP 两步验证：在 Web 控制台的「系统设置」中启用 TOTP，配合 Google Authenticator 等认证器使用。TOTP 密钥应安全存储在数据库中。
 3. 启用 API Key 认证：为 API 调用启用 Bearer Token 认证，调用时需携带 Authorization: Bearer <api_key> 头。
-4. 启用消息限流：在系统设置中配置请求限流策略，防止滥用。
+```4. 启用消息限流：在系统设置中配置请求限流策略，防止滥用。
 
 4.2 网络安全配置
 
