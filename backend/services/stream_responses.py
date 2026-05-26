@@ -10,6 +10,7 @@ from .pending import PendingTurn, PendingTurnRegistry
 from .response_payloads import build_openai_response, estimate_usage
 from .realtime import ConnectionLease, RealtimeBroker
 from .stream_common import (
+    abort_pending_if_expired,
     build_stream_response,
     client_disconnected,
     discard_pending_turn,
@@ -399,6 +400,13 @@ def stream_pending_turn(
                         publish_sync=publish_sync,
                     )
                     return
+
+                abort_pending_if_expired(
+                    pending,
+                    pending_turns=pending_turns,
+                    store=store,
+                    publish_sync=publish_sync,
+                )
 
                 for chunk in pending_turns.consume_draft_chunks(pending.request_id):
                     if isinstance(chunk, dict):

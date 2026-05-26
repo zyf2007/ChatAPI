@@ -24,6 +24,7 @@ function buildEmptyAutomationRule(): AutomationRule {
     timing: {
       delay_seconds: 0,
       repeat_interval_seconds: 0,
+      max_output_count: 120,
     },
     action: {
       type: 'output_text',
@@ -82,6 +83,7 @@ export function useAutomationRules() {
       timing: {
         delay_seconds: Number(rule.timing.delay_seconds) || 0,
         repeat_interval_seconds: Number(rule.timing.repeat_interval_seconds) || 0,
+        max_output_count: Math.max(1, Number(rule.timing.max_output_count) || 120),
       },
       action: {
         ...rule.action,
@@ -93,8 +95,12 @@ export function useAutomationRules() {
       },
     }
 
-    if (normalized.timing.delay_seconds < 0 || normalized.timing.repeat_interval_seconds < 0) {
-      appMessage.warning('时间配置必须大于等于 0')
+    if (
+      normalized.timing.delay_seconds < 0
+      || normalized.timing.repeat_interval_seconds < 0
+      || normalized.timing.max_output_count < 1
+    ) {
+      appMessage.warning('时间和次数配置不合法')
       return
     }
     if (normalized.action.type === 'output_text' && !normalized.action.text.trim()) {

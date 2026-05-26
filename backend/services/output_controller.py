@@ -47,6 +47,9 @@ class TurnOutputController:
             chunk=normalize_message_text(text),
             kind=kind,
         )
+        if pending.aborted:
+            self._mark_aborted_conversation(pending)
+            raise ValueError(pending.abort_message or "request aborted")
         self._apply_reasoning_stream_mode(
             pending,
             conversation_id=conversation_id,
@@ -162,6 +165,13 @@ class TurnOutputController:
         )
         call_id = tool_call_id or f"call_{uuid.uuid4().hex[:24]}"
         assistant_text = f"{tool_name}({arguments})"
+        aborted = self._pending_turns.abort_if_output_would_exceed(
+            request_id=pending.request_id,
+            extra_text=assistant_text,
+        )
+        if aborted is not None:
+            self._mark_aborted_conversation(aborted)
+            raise ValueError(aborted.abort_message or "request aborted")
         response_id = build_protocol_response_id(pending.request_format, pending.request_id)
         output_items = [
             {
@@ -223,11 +233,28 @@ class TurnOutputController:
         owner_id: str,
         error_message: str,
     ):
-        return self._pending_turns.abort(
+        pending = self._pending_turns.abort(
             conversation_id=conversation_id,
             owner_id=owner_id,
             error_message=error_message,
         )
+        self._mark_aborted_conversation(pending)
+        return pending
+
+    def _mark_aborted_conversation(self, pending):
+        conversation = self._store.get_conversation(pending.conversation_id, pending.owner_id)
+        if conversation is None:
+            return
+        self._store.update_conversation(
+            pending.conversation_id,
+            pending.owner_id,
+            metadata={
+                **conversation.metadata,
+                "realtime_status": "aborted",
+                "realtime_draft_text": "",
+            },
+        )
+        self._notify(pending.owner_id, pending.conversation_id)
 
     def _require_pending(self, conversation_id: str, owner_id: str):
         pending = self._pending_turns.get_by_conversation(conversation_id)

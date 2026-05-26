@@ -10,6 +10,7 @@ from .pending import PendingTurn, PendingTurnRegistry
 from .realtime import ConnectionLease, RealtimeBroker
 from .response_payloads import estimate_usage
 from .stream_common import (
+    abort_pending_if_expired,
     build_stream_response,
     client_disconnected,
     discard_pending_turn,
@@ -80,6 +81,13 @@ def stream_chat_completion_turn(
                         publish_sync=publish_sync,
                     )
                     return
+
+                abort_pending_if_expired(
+                    pending,
+                    pending_turns=pending_turns,
+                    store=store,
+                    publish_sync=publish_sync,
+                )
 
                 for piece in pending_turns.consume_draft_chunks(pending.request_id):
                     if isinstance(piece, dict):

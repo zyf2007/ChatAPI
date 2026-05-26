@@ -17,6 +17,10 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   image_max_single_bytes: 0,
   image_max_request_bytes: 0,
   image_max_total_bytes: 0,
+  pending_max_per_user: 10,
+  pending_max_age_hours: 48,
+  pending_max_output_chars: 300,
+  pending_auto_abort_message: '本次回复等待超过限制，已自动结束，请重新发送。',
   image_usage: {
     total_bytes: 0,
     file_count: 0,
@@ -50,6 +54,12 @@ export function normalizeSystemConfig(data: Partial<SystemConfig> & { ok?: boole
     image_max_single_bytes: Number(data.image_max_single_bytes ?? 0),
     image_max_request_bytes: Number(data.image_max_request_bytes ?? 0),
     image_max_total_bytes: Number(data.image_max_total_bytes ?? 0),
+    pending_max_per_user: Math.max(1, Number(data.pending_max_per_user ?? 10)),
+    pending_max_age_hours: Math.max(0, Number(data.pending_max_age_hours ?? 48)),
+    pending_max_output_chars: Math.max(0, Number(data.pending_max_output_chars ?? 300)),
+    pending_auto_abort_message: String(
+      data.pending_auto_abort_message ?? '本次回复等待超过限制，已自动结束，请重新发送。',
+    ),
     image_usage: data.image_usage ?? DEFAULT_SYSTEM_CONFIG.image_usage,
   }
 

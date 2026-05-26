@@ -122,6 +122,13 @@ class SystemConfigStore:
         image_max_single_bytes = self._get_non_negative_int("value.image_max_single_bytes", 0)
         image_max_request_bytes = self._get_non_negative_int("value.image_max_request_bytes", 0)
         image_max_total_bytes = self._get_non_negative_int("value.image_max_total_bytes", 0)
+        pending_max_per_user = self._get_positive_int("value.pending_max_per_user", 10)
+        pending_max_age_hours = self._get_non_negative_int("value.pending_max_age_hours", 48)
+        pending_max_output_chars = self._get_non_negative_int("value.pending_max_output_chars", 300)
+        pending_auto_abort_message = self.get_system_config(
+            "value.pending_auto_abort_message",
+            "本次回复等待超过限制，已自动结束，请重新发送。",
+        )
         return {
             "public_statistics": self.get_system_config_flag("public_statistics", False),
             "title_enabled": self.get_system_config_flag("flag.title", False),
@@ -147,6 +154,10 @@ class SystemConfigStore:
             "image_max_single_bytes": image_max_single_bytes,
             "image_max_request_bytes": image_max_request_bytes,
             "image_max_total_bytes": image_max_total_bytes,
+            "pending_max_per_user": pending_max_per_user,
+            "pending_max_age_hours": pending_max_age_hours,
+            "pending_max_output_chars": pending_max_output_chars,
+            "pending_auto_abort_message": pending_auto_abort_message,
         }
 
     def _get_non_negative_int(self, key: str, default: int) -> int:
@@ -203,6 +214,29 @@ class SystemConfigStore:
             "image_max_total_bytes",
             "图片总容量上限必须是大于等于 0 的整数",
         )
+        pending_max_per_user = self._normalize_non_negative_config_int(
+            data,
+            "pending_max_per_user",
+            "每用户最多等待会话数必须是大于等于 0 的整数",
+        )
+        if pending_max_per_user <= 0:
+            pending_max_per_user = 10
+        pending_max_age_hours = self._normalize_non_negative_config_int(
+            data,
+            "pending_max_age_hours",
+            "等待会话最长保留时间必须是大于等于 0 的整数",
+        )
+        pending_max_output_chars = self._normalize_non_negative_config_int(
+            data,
+            "pending_max_output_chars",
+            "单次回复长度上限必须是大于等于 0 的整数",
+        )
+        pending_auto_abort_message = str(
+            data.get("pending_auto_abort_message")
+            or "本次回复等待超过限制，已自动结束，请重新发送。"
+        ).strip()
+        if len(pending_auto_abort_message) > 500:
+            raise ValueError("等待会话自动结束提示不能超过 500 个字符")
         if registration_email_domain_restriction_enabled:
             registration_email_domains = self._normalize_registration_email_domains(
                 str(data.get("registration_email_domains", "")),
@@ -245,6 +279,22 @@ class SystemConfigStore:
         self.set_system_config("value.image_max_single_bytes", str(image_max_single_bytes))
         self.set_system_config("value.image_max_request_bytes", str(image_max_request_bytes))
         self.set_system_config("value.image_max_total_bytes", str(image_max_total_bytes))
+        self.set_system_config("value.pending_max_per_user", str(pending_max_per_user))
+        self.set_system_config("value.pending_max_age_hours", str(pending_max_age_hours))
+        self.set_system_config("value.pending_max_output_chars", str(pending_max_output_chars))
+        self.set_system_config("value.pending_auto_abort_message", pending_auto_abort_message)
+
+    def get_pending_limits(self) -> dict[str, Any]:
+        return {
+            "max_per_user": self._get_positive_int("value.pending_max_per_user", 10),
+            "max_age_seconds": self._get_non_negative_int("value.pending_max_age_hours", 48) * 3600,
+            "max_output_chars": self._get_non_negative_int("value.pending_max_output_chars", 300),
+            "abort_message": self.get_system_config(
+                "value.pending_auto_abort_message",
+                "本次回复等待超过限制，已自动结束，请重新发送。",
+            ).strip() or "本次回复等待超过限制，已自动结束，请重新发送。",
+            "output_limit_abort_message": "本次回复超过长度限制，已自动结束，请重新发送。",
+        }
 
     def _normalize_non_negative_config_int(
         self,

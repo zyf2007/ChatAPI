@@ -73,6 +73,7 @@ class AutomationRule:
     excludes: list[dict[str, str]]
     delay_seconds: float
     repeat_interval_seconds: float
+    max_output_count: int
     action_type: str
     action_text: str
     error_message: str
@@ -135,6 +136,11 @@ def normalize_rule_payload(raw_rule: dict[str, Any]) -> dict[str, Any]:
         action = {}
     delay_seconds = _as_non_negative_float(timing.get("delay_seconds"))
     repeat_interval_seconds = _as_non_negative_float(timing.get("repeat_interval_seconds"))
+    try:
+        max_output_count = int(timing.get("max_output_count") or 120)
+    except (TypeError, ValueError):
+        max_output_count = 120
+    max_output_count = max(1, max_output_count)
     return {
         "id": str(raw_rule.get("id") or f"rule_{uuid.uuid4().hex[:8]}"),
         "enabled": bool(raw_rule.get("enabled", True)),
@@ -145,6 +151,7 @@ def normalize_rule_payload(raw_rule: dict[str, Any]) -> dict[str, Any]:
         "timing": {
             "delay_seconds": delay_seconds,
             "repeat_interval_seconds": repeat_interval_seconds,
+            "max_output_count": max_output_count,
         },
         "action": {
             "type": str(action.get("type") or "").strip(),
@@ -168,6 +175,8 @@ def validate_rule_payload(raw_rule: dict[str, Any]) -> tuple[dict[str, Any] | No
         return None, "delay_seconds must be greater than or equal to 0"
     if normalized["timing"]["repeat_interval_seconds"] < 0:
         return None, "repeat_interval_seconds must be greater than or equal to 0"
+    if normalized["timing"].get("max_output_count", 120) < 1:
+        return None, "max_output_count must be greater than 0"
     for group_name in ("contains", "excludes"):
         for item in normalized["conditions"][group_name]:
             match_type = str(item.get("match_type") or "")
@@ -204,6 +213,7 @@ def materialize_rule(payload: dict[str, Any]) -> AutomationRule:
         excludes=list(payload["conditions"]["excludes"]),
         delay_seconds=float(payload["timing"]["delay_seconds"]),
         repeat_interval_seconds=float(payload["timing"]["repeat_interval_seconds"]),
+        max_output_count=max(1, int(payload["timing"].get("max_output_count", 120) or 120)),
         action_type=str(action.get("type") or ""),
         action_text=str(action.get("text") or ""),
         error_message=str(action.get("error_message") or ""),
@@ -270,6 +280,7 @@ class AutomationRuleEngine:
                     "timing": {
                         "delay_seconds": float(interval_seconds),
                         "repeat_interval_seconds": float(interval_seconds),
+                        "max_output_count": 120,
                     },
                     "action": {
                         "type": "output_text",
@@ -308,6 +319,7 @@ class AutomationRuleEngine:
         conversation_id = pending.conversation_id
         if self._sleep_until_ready(pending, rule.delay_seconds):
             return
+        output_count = 0
         while True:
             if pending.event.is_set():
                 return
@@ -318,6 +330,9 @@ class AutomationRuleEngine:
                         owner_id=owner_id,
                         text=rule.action_text,
                     )
+                    output_count += 1
+                    if output_count >= rule.max_output_count:
+                        return
                 elif rule.action_type == "complete":
                     self._output_controller.complete_assistant_message(
                         conversation_id=conversation_id,

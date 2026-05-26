@@ -31,6 +31,11 @@ export function useSystemSettingsState() {
         config.image_max_single_bytes !== savedConfig.image_max_single_bytes
         || config.image_max_request_bytes !== savedConfig.image_max_request_bytes
         || config.image_max_total_bytes !== savedConfig.image_max_total_bytes,
+      pending:
+        config.pending_max_per_user !== savedConfig.pending_max_per_user
+        || config.pending_max_age_hours !== savedConfig.pending_max_age_hours
+        || config.pending_max_output_chars !== savedConfig.pending_max_output_chars
+        || config.pending_auto_abort_message !== savedConfig.pending_auto_abort_message,
     }),
     [config, savedConfig],
   )

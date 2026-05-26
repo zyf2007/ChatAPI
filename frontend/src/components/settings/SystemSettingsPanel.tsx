@@ -281,6 +281,47 @@ export function SystemSettingsPanel({ open, onClose }: SystemSettingsPanelProps)
         </div>
 
         <div className="system-settings-row system-settings-row-stacked">
+          <Typography.Text className="system-settings-row-title">等待会话限制</Typography.Text>
+          <div className="system-settings-row-body system-settings-row-body-stacked">
+            <Typography.Text className="system-settings-row-help-static">
+              限制每个用户同时等待回复的会话数量、最长等待时间和单次回复长度。超过限制时会自动结束等待会话并返回提示，单次回复长度留空表示不限制。
+            </Typography.Text>
+            <div className="system-settings-compact">
+              <InputNumber
+                addonBefore="单用户最多等待会话"
+                value={config.pending_max_per_user}
+                min={1}
+                precision={0}
+                onChange={(value) => updateSection('pending_max_per_user', Math.max(1, Number(value ?? 10)))}
+              />
+              <InputNumber
+                addonBefore="最长等待时间（小时）"
+                value={config.pending_max_age_hours}
+                min={0}
+                precision={0}
+                onChange={(value) => updateSection('pending_max_age_hours', Math.max(0, Number(value ?? 48)))}
+              />
+              <InputNumber
+                addonBefore="单次回复长度上限（字）"
+                value={config.pending_max_output_chars || null}
+                min={0}
+                precision={0}
+                placeholder="留空表示不限制"
+                onChange={(value) => updateSection('pending_max_output_chars', Math.max(0, Number(value ?? 0)))}
+              />
+            </div>
+            <Input.TextArea
+              value={config.pending_auto_abort_message}
+              maxLength={500}
+              showCount
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              placeholder="本次回复等待超过限制，已自动结束，请重新发送。"
+              onChange={(event) => updateSection('pending_auto_abort_message', event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="system-settings-row system-settings-row-stacked">
           <Typography.Text className="system-settings-row-title">图片存储限制</Typography.Text>
           <div className="system-settings-row-body system-settings-row-body-stacked">
             <Typography.Text className="system-settings-row-help-static">

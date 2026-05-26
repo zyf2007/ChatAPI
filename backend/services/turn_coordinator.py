@@ -142,6 +142,41 @@ class TurnCoordinator:
     def build_not_found_error(self, message: str, *, code: str = "not_found", status: int = 404):
         return build_openai_error(message, code=code, status=status)
 
+    def _pending_limits(self) -> dict[str, Any]:
+        return self._deps.system_config_store.get_pending_limits()
+
+    def _mark_aborted_pending_turns(self, pending_turns: list[PendingTurn]) -> None:
+        for pending in pending_turns:
+            conversation = self.store.get_conversation(pending.conversation_id, pending.owner_id)
+            self.store.update_conversation(
+                pending.conversation_id,
+                pending.owner_id,
+                metadata={
+                    **(conversation.metadata if conversation else {}),
+                    "realtime_status": "aborted",
+                    "realtime_draft_text": "",
+                },
+            )
+            self._notify(pending.owner_id, pending.conversation_id)
+
+    def enforce_pending_limits(self, owner_id: str) -> dict[str, Any]:
+        limits = self._pending_limits()
+        abort_message = str(limits.get("abort_message") or "本次回复等待超过限制，已自动结束，请重新发送。")
+        aborted = self.pending_turns.abort_expired(
+            max_age_seconds=float(limits.get("max_age_seconds") or 0),
+            error_message=abort_message,
+        )
+        aborted.extend(
+            self.pending_turns.abort_owner_over_limit(
+                owner_id=owner_id,
+                max_active=int(limits.get("max_per_user") or 10),
+                error_message=abort_message,
+            )
+        )
+        if aborted:
+            self._mark_aborted_pending_turns(aborted)
+        return limits
+
     def _resolve_reasoning_stream_mode(
         self,
         data: dict[str, Any],
@@ -298,6 +333,7 @@ class TurnCoordinator:
             else build_title(context_text),
             last_user_text=context_text[:1000],
         )
+        pending_limits = self.enforce_pending_limits(owner)
         pending = self.pending_turns.register(
             conversation_id=conversation.id,
             owner_id=owner,
@@ -305,6 +341,14 @@ class TurnCoordinator:
             input_text=context_text,
             request_format=request_format,
             reasoning_stream_mode=reasoning_stream_mode,
+            max_age_seconds=float(pending_limits.get("max_age_seconds") or 0),
+            auto_abort_message=str(pending_limits.get("abort_message") or ""),
+            max_output_chars=int(
+                300
+                if pending_limits.get("max_output_chars") is None
+                else pending_limits.get("max_output_chars")
+            ),
+            output_limit_abort_message=str(pending_limits.get("output_limit_abort_message") or ""),
             available_tool_names=extract_tool_names(normalized_data),
             available_tool_schemas=extract_tool_schemas(normalized_data),
         )

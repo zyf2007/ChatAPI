@@ -6,6 +6,7 @@ from ..core import AppDependencies
 from ..services.email import get_available_email_providers, resolve_email_provider
 from ..services.realtime import ConnectionLimitExceeded, ConnectionLease, RealtimeBroker
 from ..services.response_stream import (
+    abort_pending_if_expired,
     client_disconnected,
     discard_pending_turn,
     stream_anthropic_turn,
@@ -97,6 +98,12 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
 
         client_socket = request.environ.get("werkzeug.socket")
         while True:
+            abort_pending_if_expired(
+                pending,
+                pending_turns=deps.pending_turns,
+                store=deps.store,
+                publish_sync=publish_sync,
+            )
             if pending.event.is_set():
                 waited = deps.pending_turns.wait(pending.request_id)
                 if waited.aborted:

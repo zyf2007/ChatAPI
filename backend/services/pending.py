@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,11 @@ class PendingTurn:
     input_text: str
     request_format: str = "responses"
     reasoning_stream_mode: str = ""
+    created_at: float = field(default_factory=time.time)
+    max_age_seconds: float = 0.0
+    auto_abort_message: str = ""
+    max_output_chars: int = 0
+    output_limit_abort_message: str = ""
     event: threading.Event = field(default_factory=threading.Event)
     stream_event: threading.Event = field(default_factory=threading.Event)
     assistant_text: str = ""
@@ -24,6 +30,7 @@ class PendingTurn:
     draft_text: str = ""
     draft_segments: list[dict[str, str]] = field(default_factory=list)
     draft_answer_text: str = ""
+    output_chars: int = 0
     aborted: bool = False
     abort_message: str = ""
     resolved: bool = False
@@ -49,12 +56,21 @@ class PendingTurnRegistry:
         input_text: str,
         request_format: str = "responses",
         reasoning_stream_mode: str = "",
+        max_age_seconds: float = 0.0,
+        auto_abort_message: str = "",
+        max_output_chars: int = 0,
+        output_limit_abort_message: str = "",
         available_tool_names: set[str] | None = None,
         available_tool_schemas: dict[str, dict[str, Any]] | None = None,
     ) -> PendingTurn:
         with self._lock:
             if conversation_id in self._by_conversation_id:
-                raise ValueError("conversation is waiting for a reply")
+                existing_request_id = self._by_conversation_id.get(conversation_id)
+                existing = self._by_request_id.get(existing_request_id or "")
+                if existing is not None and existing.event.is_set():
+                    self._by_conversation_id.pop(conversation_id, None)
+                else:
+                    raise ValueError("conversation is waiting for a reply")
             pending = PendingTurn(
                 request_id=f"resp_{uuid.uuid4().hex}",
                 conversation_id=conversation_id,
@@ -63,6 +79,10 @@ class PendingTurnRegistry:
                 input_text=input_text,
                 request_format=request_format,
                 reasoning_stream_mode=reasoning_stream_mode,
+                max_age_seconds=max(0.0, float(max_age_seconds or 0.0)),
+                auto_abort_message=str(auto_abort_message or ""),
+                max_output_chars=max(0, int(max_output_chars or 0)),
+                output_limit_abort_message=str(output_limit_abort_message or ""),
                 available_tool_names=available_tool_names or set(),
                 available_tool_schemas=available_tool_schemas or {},
             )
@@ -75,7 +95,55 @@ class PendingTurnRegistry:
             request_id = self._by_conversation_id.get(conversation_id)
             if not request_id:
                 return None
-            return self._by_request_id.get(request_id)
+            pending = self._by_request_id.get(request_id)
+            if pending is not None and pending.event.is_set():
+                self._by_conversation_id.pop(conversation_id, None)
+                return None
+            return pending
+
+    def active_count_by_owner(self, owner_id: str) -> int:
+        with self._lock:
+            return sum(
+                1
+                for pending in self._by_request_id.values()
+                if pending.owner_id == owner_id and not pending.event.is_set()
+            )
+
+    def abort_owner_over_limit(
+        self,
+        *,
+        owner_id: str,
+        max_active: int,
+        error_message: str,
+    ) -> list[PendingTurn]:
+        if max_active <= 0:
+            return []
+        aborted: list[PendingTurn] = []
+        with self._lock:
+            active = sorted(
+                (
+                    pending
+                    for pending in self._by_request_id.values()
+                    if pending.owner_id == owner_id and not pending.event.is_set()
+                ),
+                key=lambda pending: pending.created_at,
+            )
+            while len(active) >= max_active:
+                pending = active.pop(0)
+                aborted.append(self._mark_aborted_locked(pending, error_message))
+        return aborted
+
+    def abort_expired(self, *, max_age_seconds: float, error_message: str) -> list[PendingTurn]:
+        if max_age_seconds <= 0:
+            return []
+        deadline = time.time() - max_age_seconds
+        aborted: list[PendingTurn] = []
+        with self._lock:
+            for pending in list(self._by_request_id.values()):
+                if pending.event.is_set() or pending.created_at > deadline:
+                    continue
+                aborted.append(self._mark_aborted_locked(pending, error_message))
+        return aborted
 
     def resolve(
         self,
@@ -135,6 +203,13 @@ class PendingTurnRegistry:
                 raise ValueError("conversation is not waiting for a reply")
             if pending.resolved or pending.event.is_set():
                 raise ValueError("conversation reply is already completed")
+            chunk = str(chunk or "")
+            output_limit_abort = self._mark_aborted_if_output_limit_exceeded_locked(
+                pending,
+                chunk,
+            )
+            if output_limit_abort is not None:
+                return output_limit_abort
             normalized_kind = "thinking" if str(kind).strip() == "thinking" else "answer"
             if normalized_kind == "thinking":
                 if not pending.draft_segments and pending.draft_text:
@@ -157,6 +232,7 @@ class PendingTurnRegistry:
                 pending.draft_chunks.append(chunk)
                 pending.draft_text += chunk
                 pending.draft_answer_text += chunk
+            pending.output_chars += len(chunk)
             pending.stream_event.set()
             return pending
 
@@ -176,11 +252,75 @@ class PendingTurnRegistry:
                 raise ValueError("conversation is not waiting for a reply")
             if pending.resolved or pending.event.is_set():
                 raise ValueError("conversation reply is already completed")
-            pending.aborted = True
-            pending.abort_message = error_message
-            pending.stream_event.set()
-            pending.event.set()
-            return pending
+            return self._mark_aborted_locked(pending, error_message)
+
+    def abort_by_request_id(self, *, request_id: str, error_message: str) -> PendingTurn | None:
+        with self._lock:
+            pending = self._by_request_id.get(request_id)
+            if pending is None or pending.resolved or pending.event.is_set():
+                return None
+            return self._mark_aborted_locked(pending, error_message)
+
+    def abort_if_expired(self, request_id: str) -> PendingTurn | None:
+        with self._lock:
+            pending = self._by_request_id.get(request_id)
+            if pending is None or pending.resolved or pending.event.is_set():
+                return None
+            if pending.max_age_seconds <= 0:
+                return None
+            if time.time() - pending.created_at < pending.max_age_seconds:
+                return None
+            return self._mark_aborted_locked(
+                pending,
+                pending.auto_abort_message or "本次回复等待超过限制，已自动结束，请重新发送。",
+            )
+
+    def abort_if_output_would_exceed(
+        self,
+        *,
+        request_id: str,
+        extra_text: str,
+    ) -> PendingTurn | None:
+        with self._lock:
+            pending = self._by_request_id.get(request_id)
+            if pending is None or pending.resolved or pending.event.is_set():
+                return None
+            return self._mark_aborted_if_output_limit_exceeded_locked(
+                pending,
+                str(extra_text or ""),
+            )
+
+    @staticmethod
+    def _clear_draft_locked(pending: PendingTurn) -> None:
+        pending.draft_chunks.clear()
+        pending.draft_text = ""
+        pending.draft_segments.clear()
+        pending.draft_answer_text = ""
+        pending.output_chars = 0
+
+    def _mark_aborted_if_output_limit_exceeded_locked(
+        self,
+        pending: PendingTurn,
+        extra_text: str,
+    ) -> PendingTurn | None:
+        if pending.max_output_chars <= 0:
+            return None
+        if not extra_text:
+            return None
+        if pending.output_chars + len(extra_text) <= pending.max_output_chars:
+            return None
+        return self._mark_aborted_locked(
+            pending,
+            pending.output_limit_abort_message or "本次回复超过长度限制，已自动结束，请重新发送。",
+        )
+
+    def _mark_aborted_locked(self, pending: PendingTurn, error_message: str) -> PendingTurn:
+        pending.aborted = True
+        pending.abort_message = error_message
+        self._clear_draft_locked(pending)
+        pending.stream_event.set()
+        pending.event.set()
+        return pending
 
     def discard(
         self,

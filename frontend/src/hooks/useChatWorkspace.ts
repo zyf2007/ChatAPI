@@ -53,6 +53,10 @@ export function useChatWorkspace(isMobile: boolean) {
   const [abortReason, setAbortReason] = useState('')
   const [totpEnabled, setTotpEnabled] = useState(false)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
+  const selectedRealtimeStatusRef = useRef<{ conversationId: string; status: string }>({
+    conversationId: '',
+    status: '',
+  })
   const keyboardOffset = useKeyboardOffset()
   const automation = useAutomationRules()
 
@@ -97,6 +101,28 @@ export function useChatWorkspace(isMobile: boolean) {
   const selectedToolSchema =
     availableToolSchemas.find((item) => item.name === toolName) ?? null
   const visibleMessages = buildVisibleMessages(messages, draftBuffer)
+
+  useEffect(() => {
+    const currentStatus = String(selectedConversation?.metadata?.realtime_status || '')
+    const previous = selectedRealtimeStatusRef.current
+    if (
+      selectedConversationId
+      && previous.conversationId === selectedConversationId
+      && previous.status === 'waiting'
+      && currentStatus === 'aborted'
+    ) {
+      setComposer('')
+      clearThinkingInput()
+      setToolName('')
+      setToolCallId('')
+      setToolFormValues({})
+      setComposerMode('assistant_message')
+    }
+    selectedRealtimeStatusRef.current = {
+      conversationId: selectedConversationId,
+      status: currentStatus,
+    }
+  }, [selectedConversationId, selectedConversation?.metadata?.realtime_status])
 
   function setDraftBufferForConversation(conversationId: string, value: string) {
     if (!conversationId) return

@@ -323,6 +323,27 @@ export function AutomationRuleEditorModal({
                   />
                 </div>
               )}
+              {editingAutomationRule?.action.type === 'output_text' && (
+                <div className="automation-editor-inline-field">
+                  <Typography.Text className="prune-input-label">最多输出次数</Typography.Text>
+                  <InputNumber
+                    min={1}
+                    precision={0}
+                    value={editingAutomationRule?.timing.max_output_count ?? 120}
+                    onChange={(value) => {
+                      if (!editingAutomationRule) return
+                      setEditingAutomationRule({
+                        ...editingAutomationRule,
+                        timing: {
+                          ...editingAutomationRule.timing,
+                          max_output_count: Math.max(1, Number(value ?? 120)),
+                        },
+                      })
+                    }}
+                    className="prune-input"
+                  />
+                </div>
+              )}
             </div>
             {editingAutomationRule?.action.type === 'output_text' ? (
               <div className="automation-editor-action-field">

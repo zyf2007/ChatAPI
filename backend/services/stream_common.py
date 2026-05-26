@@ -30,6 +30,31 @@ def client_disconnected(client_socket: Any) -> bool:
         return True
 
 
+def _mark_conversation_aborted(
+    pending: PendingTurn,
+    *,
+    store: Any,
+    publish_sync: Callable[[str, str | None], None] | None = None,
+) -> None:
+    conversation = store.get_conversation(pending.conversation_id, pending.owner_id)
+    if conversation is None:
+        return
+    try:
+        store.update_conversation(
+            pending.conversation_id,
+            pending.owner_id,
+            metadata={
+                **conversation.metadata,
+                "realtime_status": "aborted",
+                "realtime_draft_text": "",
+            },
+        )
+    except ValueError:
+        return
+    if publish_sync is not None:
+        publish_sync(pending.owner_id, pending.conversation_id)
+
+
 def discard_pending_turn(
     pending: PendingTurn,
     *,
@@ -43,17 +68,29 @@ def discard_pending_turn(
     )
     if discarded is None:
         return
-    conversation = store.get_conversation(discarded.conversation_id, discarded.owner_id)
-    store.update_conversation(
-        discarded.conversation_id,
-        discarded.owner_id,
-        metadata={
-            **(conversation.metadata if conversation else {}),
-            "realtime_status": "aborted",
-        },
+    _mark_conversation_aborted(
+        discarded,
+        store=store,
+        publish_sync=publish_sync,
     )
-    if publish_sync is not None:
-        publish_sync(discarded.owner_id, discarded.conversation_id)
+
+
+def abort_pending_if_expired(
+    pending: PendingTurn,
+    *,
+    pending_turns: PendingTurnRegistry,
+    store: Any,
+    publish_sync: Callable[[str, str | None], None] | None = None,
+) -> PendingTurn | None:
+    aborted = pending_turns.abort_if_expired(pending.request_id)
+    if aborted is None:
+        return None
+    _mark_conversation_aborted(
+        aborted,
+        store=store,
+        publish_sync=publish_sync,
+    )
+    return aborted
 
 
 def sse_event(event: str, data: dict[str, Any]) -> str:

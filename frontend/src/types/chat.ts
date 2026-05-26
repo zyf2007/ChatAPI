@@ -181,6 +181,7 @@ export type AutomationRule = {
   timing: {
     delay_seconds: number
     repeat_interval_seconds: number
+    max_output_count: number
   }
   action: {
     type: 'output_text' | 'complete' | 'error' | 'tool_call'
@@ -223,6 +224,10 @@ export type SystemConfig = {
   image_max_single_bytes: number
   image_max_request_bytes: number
   image_max_total_bytes: number
+  pending_max_per_user: number
+  pending_max_age_hours: number
+  pending_max_output_chars: number
+  pending_auto_abort_message: string
   image_usage?: {
     total_bytes: number
     file_count: number
