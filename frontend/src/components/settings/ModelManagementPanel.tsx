@@ -126,7 +126,7 @@ export function ModelManagementPanel({ open }: ModelManagementPanelProps) {
     <div className="api-key-management-panel">
       <div className="api-key-management-header">
         <Typography.Text className="api-key-management-subtitle">
-          管理可供客户端选择的模型标识符。
+          管理你自己的模型标识符，客户端会按当前账号返回这些模型。
         </Typography.Text>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => form.submit()}>
           添加模型

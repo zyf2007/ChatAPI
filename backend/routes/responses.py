@@ -20,6 +20,7 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
     auth = deps.auth
     store = deps.store
     system_config_store = deps.system_config_store
+    user_store = deps.user_store
     realtime = app.extensions.get("chat_realtime")
 
     def publish_sync(owner_id: str, conversation_id: str | None = None) -> None:
@@ -131,7 +132,11 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
     @app.get("/v1/models")
     @auth.require_auth
     def list_models():
-        model_ids = system_config_store.get_model_ids()
+        owner_id = auth.owner_id()
+        model_ids = user_store.get_user_model_ids(
+            owner_id,
+            default_model_ids=system_config_store.get_model_ids(),
+        )
         if not model_ids:
             abort(404)
         return {
@@ -188,13 +193,18 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
 
     @app.get("/api/config/models")
     @auth.require_session_auth
-    @auth.require_admin
     def get_config_models():
-        return {"ok": True, "models": system_config_store.get_model_ids()}
+        owner_id = auth.owner_id()
+        return {
+            "ok": True,
+            "models": user_store.get_user_model_ids(
+                owner_id,
+                default_model_ids=system_config_store.get_model_ids(),
+            ),
+        }
 
     @app.post("/api/config/models")
     @auth.require_session_auth
-    @auth.require_admin
     def add_config_model():
         data = request.get_json(silent=True) or {}
         if not isinstance(data, dict):
@@ -202,20 +212,31 @@ def register_response_routes(app: Flask, *, deps: AppDependencies) -> None:
         model_id = str(data.get("id", "")).strip()
         if not model_id:
             return {"error": "model id is required"}, 400
-        existing = system_config_store.get_model_ids()
+        owner_id = auth.owner_id()
+        existing = user_store.get_user_model_ids(
+            owner_id,
+            default_model_ids=system_config_store.get_model_ids(),
+        )
         if model_id not in existing:
             existing.append(model_id)
-            system_config_store.set_system_config("value.model_ids", "\n".join(existing))
-        return {"ok": True, "models": system_config_store.get_model_ids()}
+            user_store.set_user_model_ids(owner_id, existing)
+        return {"ok": True, "models": user_store.get_user_model_ids(owner_id)}
 
     @app.delete("/api/config/models/<path:model_id>")
     @auth.require_session_auth
-    @auth.require_admin
     def delete_config_model(model_id: str):
         normalized_model_id = str(model_id or "").strip()
-        existing = [item for item in system_config_store.get_model_ids() if item != normalized_model_id]
-        system_config_store.set_system_config("value.model_ids", "\n".join(existing))
-        return {"ok": True, "models": system_config_store.get_model_ids()}
+        owner_id = auth.owner_id()
+        existing = [
+            item
+            for item in user_store.get_user_model_ids(
+                owner_id,
+                default_model_ids=system_config_store.get_model_ids(),
+            )
+            if item != normalized_model_id
+        ]
+        user_store.set_user_model_ids(owner_id, existing)
+        return {"ok": True, "models": user_store.get_user_model_ids(owner_id)}
 
     @app.get("/api/config/stream-heartbeat")
     @auth.require_session_auth

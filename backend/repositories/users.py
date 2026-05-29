@@ -418,6 +418,38 @@ class UserStore:
     def set_user_config_flag(self, user_id: str, name: str, enabled: bool) -> None:
         self.set_user_config(user_id, f"flag.{name}", "1" if enabled else "0")
 
+    def _get_user_config_row(self, user_id: str, key: str) -> str | None:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM user_configs WHERE user_id = ? AND key = ?",
+                (user_id, key),
+            ).fetchone()
+        if row is None:
+            return None
+        return str(row["value"] or "")
+
+    @staticmethod
+    def _normalize_model_ids(raw: str) -> str:
+        model_ids: list[str] = []
+        for item in str(raw or "").replace("\n", ",").split(","):
+            model_id = item.strip()
+            if not model_id:
+                continue
+            model_ids.append(model_id)
+        return "\n".join(dict.fromkeys(model_ids))
+
+    def get_user_model_ids(self, user_id: str, default_model_ids: list[str] | None = None) -> list[str]:
+        raw = self._get_user_config_row(user_id, "value.model_ids")
+        if raw is None and default_model_ids is not None:
+            raw = "\n".join(default_model_ids)
+        normalized = self._normalize_model_ids(raw or "")
+        if not normalized:
+            return []
+        return [item for item in normalized.split("\n") if item]
+
+    def set_user_model_ids(self, user_id: str, model_ids: list[str]) -> None:
+        self.set_user_config(user_id, "value.model_ids", self._normalize_model_ids("\n".join(model_ids)))
+
     def get_user_config_snapshot(self, user_id: str) -> dict[str, Any]:
         return {
             "ntfy_url_enabled": self.get_user_config_flag(user_id, "ntfy_url", False),

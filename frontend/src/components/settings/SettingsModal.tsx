@@ -73,6 +73,11 @@ export function SettingsModal({
       label: 'API Keys',
       children: <ApiKeyManagementPanel open={open && activeTab === 'api-keys'} />,
     },
+    {
+      key: 'models',
+      label: '模型管理',
+      children: <ModelManagementPanel open={open && activeTab === 'models'} />,
+    },
   ]
 
   const userSettingsTab = {
@@ -90,11 +95,6 @@ export function SettingsModal({
 
   const adminTabs = [
     {
-      key: 'models',
-      label: '模型管理',
-      children: <ModelManagementPanel open={open && activeTab === 'models'} />,
-    },
-    {
       key: 'system',
       label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
       children: (
@@ -111,7 +111,7 @@ export function SettingsModal({
     },
   ]
 
-  const tabs = isAdmin ? [...commonTabs, adminTabs[0], userSettingsTab, ...adminTabs.slice(1)] : [...commonTabs, userSettingsTab]
+  const tabs = isAdmin ? [...commonTabs, userSettingsTab, ...adminTabs] : [...commonTabs, userSettingsTab]
 
   return (
     <Modal
