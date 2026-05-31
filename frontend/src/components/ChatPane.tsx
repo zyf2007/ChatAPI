@@ -12,28 +12,121 @@ import {
 import {
   Button,
   Card,
+  Empty,
   Flex,
   Input,
+  Modal,
   Select,
+  Tag,
   Segmented,
   Space,
   Typography,
 } from 'antd'
-import { LogoutOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
+import { EyeOutlined, LogoutOutlined, MenuOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons'
 
 import { GithubButton } from './GithubButton'
 import { ThemeToggle } from './ThemeToggle'
 import { ToolField } from './ToolField'
 import { ChatMessageList } from './ChatMessageList'
+import { appMessage } from '../lib/antdApp'
 import type {
   ComposerMode,
   ReasoningStreamMode,
   ToolFieldValue,
+  MessageItem,
   ToolSchemaOption,
   VisibleMessage,
 } from '../types/chat'
 
 const { TextArea } = Input
+
+type RequestContextRecord = {
+  id: string
+  created_at: string
+  request_id: string
+  request_format: string
+  model: string
+  request_keys: string[]
+  input_payload: unknown
+  headers: {
+    user_agent?: string
+    content_type?: string
+    origin?: string
+    referer?: string
+  }
+  message_roles: string[]
+}
+
+function extractRequestContextFromMessages(messages: MessageItem[]): RequestContextRecord[] {
+  const items: RequestContextRecord[] = []
+  const seen = new Set<string>()
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    const debug = message.metadata?.request_debug
+    if (!debug || typeof debug !== 'object') continue
+
+    const requestId = String(debug.request_id || '').trim()
+    if (!requestId || seen.has(requestId)) continue
+    seen.add(requestId)
+
+    const inputPayload = debug.input_payload
+    const payloadItems = Array.isArray(inputPayload) ? inputPayload : [inputPayload]
+    const messageRoles = payloadItems
+      .map((item) => (item && typeof item === 'object' && 'role' in item ? String((item as { role?: unknown }).role || '').trim() : ''))
+      .filter(Boolean)
+
+    items.push({
+      id: message.id,
+      created_at: message.created_at,
+      request_id: requestId,
+      request_format: String(debug.request_format || ''),
+      model: String(debug.model || ''),
+      request_keys: Array.isArray(debug.request_keys) ? debug.request_keys.map((item) => String(item)) : [],
+      input_payload: inputPayload,
+      headers: debug.headers && typeof debug.headers === 'object' ? {
+        user_agent: String((debug.headers as { user_agent?: unknown }).user_agent || ''),
+        content_type: String((debug.headers as { content_type?: unknown }).content_type || ''),
+        origin: String((debug.headers as { origin?: unknown }).origin || ''),
+        referer: String((debug.headers as { referer?: unknown }).referer || ''),
+      } : {},
+      message_roles: messageRoles,
+    })
+  }
+
+  return items
+}
+
+function formatSnapshotValue(value: unknown): string {
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
+function renderSnapshotPayload(payload: unknown) {
+  const items = Array.isArray(payload) ? payload : [payload]
+  return items.map((item, index) => {
+    const role = item && typeof item === 'object' && 'role' in item
+      ? String((item as { role?: unknown }).role || 'item')
+      : 'item'
+    const content = item && typeof item === 'object' && 'content' in item
+      ? (item as { content?: unknown }).content
+      : item
+    const isHiddenRole = role === 'system' || role === 'developer'
+    return (
+      <div className={`request-context-item ${isHiddenRole ? 'request-context-item-hidden' : ''}`} key={`${role}-${index}`}>
+        <div className="request-context-item-header">
+          <Tag color={isHiddenRole ? 'gold' : role === 'assistant' ? 'blue' : role === 'tool' ? 'purple' : 'green'}>{role}</Tag>
+          {isHiddenRole ? <Typography.Text type="secondary">默认不显示在普通聊天流中</Typography.Text> : null}
+        </div>
+        <pre className="request-context-pre">{formatSnapshotValue(content)}</pre>
+      </div>
+    )
+  })
+}
 
 type ChatPaneProps = {
   availableToolSchemas: ToolSchemaOption[]
@@ -50,6 +143,7 @@ type ChatPaneProps = {
   onLogout: () => void | Promise<void>
   onOpenDrawer: () => void
   onSend: () => void | Promise<void>
+  selectedConversationId: string
   selectedConversationTitle: string
   selectedRequestFormat: string
   selectedToolSchema: ToolSchemaOption | null
@@ -85,6 +179,7 @@ export function ChatPane(props: ChatPaneProps) {
     onLogout,
     onOpenDrawer,
     onSend,
+    selectedConversationId,
     selectedConversationTitle,
     selectedRequestFormat,
     selectedToolSchema,
@@ -105,6 +200,8 @@ export function ChatPane(props: ChatPaneProps) {
   } = props
   const composerCardRef = useRef<HTMLDivElement | null>(null)
   const [composerHeight, setComposerHeight] = useState(0)
+  const [requestContextOpen, setRequestContextOpen] = useState(false)
+  const [requestSnapshots, setRequestSnapshots] = useState<RequestContextRecord[]>([])
   const [visualViewportRect, setVisualViewportRect] = useState(() => ({
     bottomInset: 0,
     height: typeof window === 'undefined' ? 0 : window.innerHeight,
@@ -167,6 +264,16 @@ export function ChatPane(props: ChatPaneProps) {
     '--visual-keyboard-offset': `${visualViewportRect.bottomInset}px`,
     '--visual-viewport-height': `${visualViewportRect.height}px`,
   } as CSSProperties
+  function openRequestContext() {
+    if (!selectedConversationId) {
+      appMessage.warning('请先选择一个会话')
+      return
+    }
+    const snapshots = extractRequestContextFromMessages(visibleMessages)
+    setRequestSnapshots(snapshots)
+    setRequestContextOpen(true)
+  }
+
   const composerStyle = {
     bottom: isMobile ? `${visualViewportRect.bottomInset}px` : 0,
     maxHeight: isMobile
@@ -196,6 +303,13 @@ export function ChatPane(props: ChatPaneProps) {
           </div>
         </Space>
         <Space size={10}>
+          <Button
+            icon={<EyeOutlined />}
+            disabled={!selectedConversationId}
+            onClick={openRequestContext}
+          >
+            查看完整上下文
+          </Button>
           <GithubButton className="workspace-github-button" />
           <ThemeToggle className="workspace-theme-toggle" />
           {!isMobile && (
@@ -214,6 +328,53 @@ export function ChatPane(props: ChatPaneProps) {
           visibleMessages={visibleMessages}
         />
       </div>
+
+      <Modal
+        open={requestContextOpen}
+        title="完整请求上下文"
+        width={920}
+        footer={null}
+        onCancel={() => setRequestContextOpen(false)}
+      >
+        <Typography.Paragraph type="secondary">
+          这里展示该会话最近请求的脱敏原始上下文。system/developer 默认不会出现在普通聊天流，但会在这里用于调试。
+        </Typography.Paragraph>
+        {requestSnapshots.length === 0 ? (
+          <Empty description="当前会话暂无可用的请求上下文" />
+        ) : (
+          <Space direction="vertical" size={12} className="request-context-stack">
+            {requestSnapshots.map((snapshot) => (
+              <Card key={snapshot.id} size="small" className="request-context-card">
+                <Space direction="vertical" size={10} className="request-context-stack">
+                  <Space wrap size={8}>
+                    <Tag color="geekblue">{snapshot.request_format}</Tag>
+                    <Tag>{snapshot.model}</Tag>
+                    <Typography.Text type="secondary">{snapshot.created_at}</Typography.Text>
+                  </Space>
+                  <div className="request-summary-grid">
+                    <div className="request-summary-item"><span className="request-summary-label">请求格式</span><span className="request-summary-value">{snapshot.request_format || '-'}</span></div>
+                    <div className="request-summary-item"><span className="request-summary-label">模型</span><span className="request-summary-value">{snapshot.model || '-'}</span></div>
+                    <div className="request-summary-item"><span className="request-summary-label">请求 ID</span><span className="request-summary-value">{snapshot.request_id || '-'}</span></div>
+                    <div className="request-summary-item request-summary-item-wide"><span className="request-summary-label">请求 Keys</span><span className="request-summary-value">{(snapshot.request_keys ?? []).join(', ') || '-'}</span></div>
+                    <div className="request-summary-item request-summary-item-wide"><span className="request-summary-label">User-Agent</span><span className="request-summary-value">{snapshot.headers?.user_agent || '-'}</span></div>
+                    <div className="request-summary-item request-summary-item-wide"><span className="request-summary-label">Content-Type</span><span className="request-summary-value">{snapshot.headers?.content_type || '-'}</span></div>
+                  </div>
+                  <Space wrap size={6}>
+                    {snapshot.message_roles.map((role, index) => (
+                      <Tag key={`${snapshot.id}-${role}-${index}`} color={role === 'system' || role === 'developer' ? 'gold' : undefined}>
+                        {role}
+                      </Tag>
+                    ))}
+                  </Space>
+                  <div className="request-context-list">
+                    {renderSnapshotPayload(snapshot.input_payload)}
+                  </div>
+                </Space>
+              </Card>
+            ))}
+          </Space>
+        )}
+      </Modal>
 
       <Card ref={composerCardRef} className="composer-card" style={composerStyle}>
         <div className="composer-shell">

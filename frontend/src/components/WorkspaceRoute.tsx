@@ -185,6 +185,7 @@ export function WorkspaceRoute() {
             onLogout={workspace.handleLogout}
             onOpenDrawer={() => workspace.setDrawerOpen(true)}
             onSend={workspace.handleSend}
+            selectedConversationId={workspace.selectedConversationId}
             selectedConversationTitle={workspace.selectedConversation?.title || ''}
             selectedRequestFormat={workspace.selectedRequestFormat}
             selectedToolSchema={workspace.selectedToolSchema}
