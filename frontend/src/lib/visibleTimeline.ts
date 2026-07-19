@@ -1,8 +1,9 @@
-import type { TimelineItem, VisibleTimelineItem } from '../types/chat'
+import type { TimelineItem, TimelineMessageContentPart, VisibleTimelineItem } from '../types/chat'
 
 export function buildVisibleTimeline(
   items: TimelineItem[],
   draftBuffer: string,
+  draftSegments?: TimelineMessageContentPart[],
 ): VisibleTimelineItem[] {
   const visible: VisibleTimelineItem[] = []
   const toolResultIndexByCallId = new Map<string, number>()
@@ -29,7 +30,8 @@ export function buildVisibleTimeline(
     visible.push(item)
   }
 
-  if (!draftBuffer) {
+  const hasDraftSegments = Array.isArray(draftSegments) && draftSegments.length > 0
+  if (!draftBuffer && !hasDraftSegments) {
     return visible
   }
 
@@ -40,7 +42,9 @@ export function buildVisibleTimeline(
       kind: 'draft',
       created_at: new Date().toISOString(),
       draft: true,
+      // content remains answer-only; content_parts carry ordered thinking/answer for render.
       content: draftBuffer,
+      content_parts: hasDraftSegments ? draftSegments : undefined,
     },
   ]
 }

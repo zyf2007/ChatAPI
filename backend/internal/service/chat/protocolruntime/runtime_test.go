@@ -275,44 +275,152 @@ func TestRuntimeBuildsChatCompletionToolCallChunks(t *testing.T) {
 	}
 }
 
-func TestRuntimeEmitsAnthropicThinkingBlocks(t *testing.T) {
-	runtime := New(protocol.ConversationMeta{
-		Protocol: protocol.ProtocolAnthropicMessages,
-		Model:    "claude-test",
-	})
-
-	thinking := runtime.Apply(Action{Kind: ActionDelta, Mode: "thinking", DeltaText: "think"})
-	if len(thinking.StreamEvents) < 2 {
-		t.Fatalf("expected thinking block start + delta, got %#v", thinking.StreamEvents)
+func TestRuntimeDowngradesAnthropicThinkingToText(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolAnthropicMessages, Model: "claude-test"})
+	thinking := runtime.Apply(Action{Kind: ActionDelta, Mode: "thinking", DeltaText: "alpha"})
+	if len(thinking.StreamEvents) != 2 {
+		t.Fatalf("expected text block start and delta: %#v", thinking.StreamEvents)
 	}
-	if thinking.StreamEvents[0].Event != "content_block_start" {
-		t.Fatalf("unexpected thinking start: %#v", thinking.StreamEvents[0])
-	}
-	startData := thinking.StreamEvents[0].Data.(map[string]any)
-	block := startData["content_block"].(map[string]any)
-	if block["type"] != "thinking" {
-		t.Fatalf("expected thinking content block, got %#v", block)
+	start := thinking.StreamEvents[0].Data.(map[string]any)["content_block"].(map[string]any)
+	if start["type"] != "text" {
+		t.Fatalf("thinking became official Anthropic block: %#v", start)
 	}
 	delta := thinking.StreamEvents[1].Data.(map[string]any)["delta"].(map[string]any)
-	if delta["type"] != "thinking_delta" || delta["thinking"] != "think" {
-		t.Fatalf("unexpected thinking delta: %#v", delta)
+	if delta["type"] != "text_delta" || delta["text"] != "alpha" {
+		t.Fatalf("thinking was not downgraded to text delta: %#v", delta)
 	}
-
-	text := runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "answer"})
-	done := runtime.Apply(Action{Kind: ActionComplete})
-
-	requireEventOrder(t, append(append(thinking.StreamEvents, text.StreamEvents...), done.StreamEvents...),
-		"content_block_start",
-		"content_block_delta",
-		"content_block_stop",
-		"content_block_start",
-		"content_block_delta",
-		"content_block_stop",
-		"message_delta",
-		"message_stop",
-	)
+	for _, event := range thinking.StreamEvents {
+		data, _ := event.Data.(map[string]any)
+		if data["signature"] != nil || data["type"] == "thinking_delta" || data["type"] == "signature_delta" {
+			t.Fatalf("unsigned Anthropic thinking event emitted: %#v", event)
+		}
+	}
 }
 
+func TestRuntimeAnthropicAlternatingModesOpenSeparateTextBlocks(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolAnthropicMessages, Model: "claude-test"})
+	steps := []Action{
+		{Kind: ActionDelta, Mode: "thinking", DeltaText: "alpha"},
+		{Kind: ActionDelta, Mode: "answer", DeltaText: "beta"},
+		{Kind: ActionDelta, Mode: "thinking", DeltaText: "gamma"},
+		{Kind: ActionDelta, Mode: "answer", DeltaText: "delta"},
+	}
+	var starts, stops, deltas int
+	for _, step := range steps {
+		result := runtime.Apply(step)
+		for _, event := range result.StreamEvents {
+			switch event.Event {
+			case "content_block_start":
+				starts++
+				block := event.Data.(map[string]any)["content_block"].(map[string]any)
+				if block["type"] != "text" {
+					t.Fatalf("expected text block, got %#v", block)
+				}
+				if _, ok := block["signature"]; ok {
+					t.Fatalf("signature fabricated: %#v", block)
+				}
+			case "content_block_stop":
+				stops++
+			case "content_block_delta":
+				deltas++
+				delta := event.Data.(map[string]any)["delta"].(map[string]any)
+				if delta["type"] != "text_delta" {
+					t.Fatalf("unexpected delta type: %#v", delta)
+				}
+			}
+			data, _ := event.Data.(map[string]any)
+			if data["type"] == "thinking_delta" || data["type"] == "signature_delta" {
+				t.Fatalf("forbidden anthropic thinking event: %#v", event)
+			}
+		}
+	}
+	// Four logical segments => four text blocks opened; three switches close previous blocks.
+	if starts != 4 || stops != 3 || deltas != 4 {
+		t.Fatalf("unexpected lifecycle starts=%d stops=%d deltas=%d", starts, stops, deltas)
+	}
+	completed := runtime.Apply(Action{Kind: ActionComplete})
+	finalStops := 0
+	for _, event := range completed.StreamEvents {
+		if event.Event == "content_block_stop" {
+			finalStops++
+		}
+	}
+	if finalStops != 1 {
+		t.Fatalf("complete should close the final open block once: %#v", completed.StreamEvents)
+	}
+	// Non-stream content should also be 4 text blocks in the same order.
+	body := protocol.BuildResponseForMeta(protocol.ConversationMeta{Protocol: protocol.ProtocolAnthropicMessages, Model: "claude-test"}, protocol.TurnResult{
+		OutputSegments: []protocol.OutputSegment{
+			{Mode: "thinking", Text: "alpha"},
+			{Mode: "answer", Text: "beta"},
+			{Mode: "thinking", Text: "gamma"},
+			{Mode: "answer", Text: "delta"},
+		},
+	})
+	content := body["content"].([]map[string]any)
+	if len(content) != 4 {
+		t.Fatalf("non-stream block count diverged: %#v", content)
+	}
+}
+
+func TestRuntimeResponsesCompletedOutputMatchesSharedBuilder(t *testing.T) {
+	segments := []protocol.OutputSegment{
+		{Mode: "thinking", Text: "alpha", ReasoningStreamMode: "summary"},
+		{Mode: "answer", Text: "beta"},
+		{Mode: "thinking", Text: "gamma", ReasoningStreamMode: "reasoning"},
+		{Mode: "answer", Text: "delta"},
+	}
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
+	for _, segment := range segments {
+		runtime.Apply(Action{
+			Kind: ActionDelta, Mode: segment.Mode, DeltaText: segment.Text, ReasoningStreamMode: segment.ReasoningStreamMode,
+		})
+	}
+	completed := runtime.Apply(Action{Kind: ActionComplete, OutputSegments: segments})
+	last := completed.StreamEvents[len(completed.StreamEvents)-1]
+	response := last.Data.(map[string]any)["response"].(map[string]any)
+	streamOutput := response["output"].([]map[string]any)
+	nonStream := protocol.BuildResponsesOutput(protocol.TurnResult{OutputSegments: segments})
+	if len(streamOutput) != len(nonStream) {
+		t.Fatalf("stream/non-stream output length mismatch stream=%d non=%d", len(streamOutput), len(nonStream))
+	}
+	for index := range nonStream {
+		if streamOutput[index]["type"] != nonStream[index]["type"] {
+			t.Fatalf("type mismatch at %d: stream=%v non=%v", index, streamOutput[index]["type"], nonStream[index]["type"])
+		}
+		if nonStream[index]["type"] != "reasoning" {
+			continue
+		}
+		streamSummary := len(asMapSlice(streamOutput[index]["summary"]))
+		streamContent := len(asMapSlice(streamOutput[index]["content"]))
+		nonSummary := len(asMapSlice(nonStream[index]["summary"]))
+		nonContent := len(asMapSlice(nonStream[index]["content"]))
+		if streamSummary != nonSummary || streamContent != nonContent {
+			t.Fatalf("reasoning field drift at %d stream=%#v non=%#v", index, streamOutput[index], nonStream[index])
+		}
+		// summary-mode must not populate content; reasoning-mode must not populate summary.
+		if nonSummary > 0 && nonContent > 0 {
+			t.Fatalf("both summary and content populated: %#v", nonStream[index])
+		}
+	}
+}
+
+func asMapSlice(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if entry, ok := item.(map[string]any); ok {
+				out = append(out, entry)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
 func TestRuntimeEmitsChatReasoningContent(t *testing.T) {
 	runtime := New(protocol.ConversationMeta{
 		Protocol: protocol.ProtocolChatCompletions,

@@ -808,6 +808,7 @@ func (s *Store) UpdateDraft(ctx context.Context, input common.UpdateDraftInput) 
 		return common.Conversation{}, errConflict
 	}
 	metadata["realtime_draft_text"] = input.DraftText
+	metadata["realtime_output_segments"] = input.OutputSegments
 	metadata["realtime_status"] = "streaming"
 	conversation.Metadata = metadata
 	conversation.UpdatedAt = time.Now().UTC()
@@ -841,9 +842,11 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	now := time.Now().UTC()
 	metadata["realtime_status"] = "closed"
 	metadata["realtime_draft_text"] = ""
+	metadata["realtime_output_segments"] = nil
 
 	messageMetadata := map[string]any{
 		"response_mode": input.Mode,
+		"output_segments": input.OutputSegments,
 	}
 	if input.ToolName != "" {
 		messageMetadata["tool_name"] = input.ToolName

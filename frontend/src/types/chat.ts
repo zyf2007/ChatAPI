@@ -106,13 +106,15 @@ export type Conversation = {
   request_id?: string
   status?: 'waiting' | 'streaming' | 'closed' | 'aborted' | 'disconnected' | 'expired' | string
   draft_text?: string
+  draft_output_segments?: TimelineMessageContentPart[]
 }
 
 export type TimelineMessageContentPart = {
-  type: 'text' | 'image' | string
+  type: 'text' | 'image' | 'thinking' | string
   text?: string
   src?: string
   media_type?: string
+  reasoning_stream_mode?: string
 }
 
 export type MessageItem = {
@@ -268,6 +270,7 @@ export type VisibleTimelineDraftItem = {
   created_at: string
   draft: true
   content: string
+  content_parts?: TimelineMessageContentPart[]
 }
 export type VisibleTimelineItem = TimelineItem | VisibleTimelineDraftItem
 export type GeetestValidationResult = {

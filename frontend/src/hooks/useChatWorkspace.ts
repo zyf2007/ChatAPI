@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
+import { decideComposerEnterAction } from './chatWorkspace/composerKeyboard'
+
 import { requestFormJson, requestJson } from '../lib/api'
 import { appMessage } from '../lib/antdMessage'
 import {
@@ -128,6 +130,7 @@ export function useChatWorkspace(isMobile: boolean) {
     .filter((item): item is TimelineItem & { message: MessageItem } => item.kind === 'message' && !!item.message)
     .map((item) => item.message)
   const draftBuffer = selectedConversation?.draft_text ?? ''
+  const draftSegments = selectedConversation?.draft_output_segments
   const isWaitingForUser = isResponseOpenStatus(selectedConversation?.status)
   const selectedConversationOpenRef = useRef(false)
   selectedConversationOpenRef.current = isWaitingForUser
@@ -139,7 +142,7 @@ export function useChatWorkspace(isMobile: boolean) {
   const availableBuiltinTools = getLastBuiltinTools(messages)
   const selectedToolSchema =
     availableToolSchemas.find((item) => item.name === toolName) ?? null
-  const visibleMessages = buildVisibleTimeline(timeline, draftBuffer)
+  const visibleMessages = buildVisibleTimeline(timeline, draftBuffer, draftSegments)
   const openedRecordedRuleRef = useRef('')
 
   useEffect(() => {
@@ -598,43 +601,41 @@ export function useChatWorkspace(isMobile: boolean) {
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Enter') return
-
     const isAnswerMode = composerMode === 'assistant_message'
     const isThinkingMode = composerMode === 'thinking'
-    const canStreamChunk = isAnswerMode || isThinkingMode
-
-    if (event.altKey) {
-      event.preventDefault()
-      // Only answer mode reuses the streamed draft buffer back into the editor.
-      if (sending || !isWaitingForUser || !isAnswerMode || !draftBuffer) {
-        return
-      }
-      setComposer(`${draftBuffer}${composer}`)
-      return
-    }
-
-    if (event.ctrlKey || event.metaKey) {
-      event.preventDefault()
-      // Ending a turn is only available from answer mode.
-      if (sending || !isWaitingForUser || !isAnswerMode) {
-        return
-      }
-      void handleSend()
-      return
-    }
-
-    if (event.shiftKey) return
-
-    // Enter = stream current chunk (answer or thinking), same as clicking the stream button.
-    event.preventDefault()
     const textarea = event.currentTarget
-    if (sending || !isWaitingForUser || !canStreamChunk || !normalizeChatText(textarea.value)) {
-      return
-    }
-    void handleDraft(textarea.value).finally(() => {
-      window.requestAnimationFrame(() => textarea.focus())
+    const decision = decideComposerEnterAction(event, {
+      sending,
+      isWaitingForUser,
+      isAnswerMode,
+      isThinkingMode,
+      hasDraftBuffer: Boolean(draftBuffer),
+      hasComposerText: Boolean(normalizeChatText(textarea.value)),
     })
+
+    switch (decision.type) {
+      case 'ignore':
+      case 'none':
+      case 'newline':
+        return
+      case 'restore_draft':
+        event.preventDefault()
+        // Only answer mode reuses the streamed draft buffer back into the editor.
+        setComposer(`${draftBuffer}${composer}`)
+        return
+      case 'complete':
+        event.preventDefault()
+        // Ending a turn is only available from answer mode (enforced in decision).
+        void handleSend()
+        return
+      case 'stream':
+        // Enter = stream current chunk (answer or thinking), same as clicking the stream button.
+        event.preventDefault()
+        void handleDraft(textarea.value).finally(() => {
+          window.requestAnimationFrame(() => textarea.focus())
+        })
+        return
+    }
   }
 
   return {

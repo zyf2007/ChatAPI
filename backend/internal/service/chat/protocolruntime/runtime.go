@@ -21,6 +21,7 @@ type Action struct {
 	Kind                ActionKind
 	DeltaText           string
 	OutputText          string
+	OutputSegments      []protocol.OutputSegment
 	Mode                string
 	ReasoningStreamMode string
 	ToolName            string
@@ -177,10 +178,9 @@ func (r *Runtime) delta(action Action) []protocol.StreamEvent {
 		}
 		return []protocol.StreamEvent{r.chatChunk(map[string]any{"content": action.DeltaText}, nil)}
 	case protocol.ProtocolAnthropicMessages:
-		if normalizedMode(action.Mode) == "thinking" {
-			return r.anthropicThinkingDelta(action.DeltaText)
-		}
-		return r.anthropicTextDelta(action.DeltaText)
+		// Human thinking is still text (no signature), but mode/segment switches must
+		// close the current block so stream block count matches non-stream content.
+		return r.anthropicLogicalTextDelta(action)
 	default:
 		if normalizedMode(action.Mode) == "thinking" {
 			return r.responsesReasoningDelta(action)
@@ -764,31 +764,50 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 			"arguments": arguments,
 		}}
 	}
+	// Prefer durable ordered segments when present so stream completed.output matches
+	// non-stream BuildResponseForMeta / buildResponsesOutput field-for-field.
+	if len(action.OutputSegments) > 0 {
+		return protocol.BuildResponsesOutput(protocol.TurnResult{
+			Mode:           action.Mode,
+			OutputText:     action.OutputText,
+			ToolName:       action.ToolName,
+			ToolCallID:     action.ToolCallID,
+			OutputSegments: action.OutputSegments,
+		})
+	}
+	// Fallback for pure live stream state without a complete segment snapshot.
 	output := make([]map[string]any, 0, 2)
 	if r.responsesReasoningText.Len() > 0 || r.responsesReasoningSummary.Len() > 0 {
 		reasoning := map[string]any{
-			"id":     nonEmpty(r.responsesReasoningItemID, "rs_"+uuid.NewString()),
-			"type":   "reasoning",
-			"status": "completed",
-			"summary": []map[string]any{{
-				"type": "summary_text",
-				"text": r.responsesReasoningSummary.String(),
-			}},
-			"content": []map[string]any{{
+			"id":      nonEmpty(r.responsesReasoningItemID, "rs_"+uuid.NewString()),
+			"type":    "reasoning",
+			"status":  "completed",
+			"summary": []map[string]any{},
+			"content": []map[string]any{},
+		}
+		if r.responsesReasoningMode == "reasoning" && r.responsesReasoningText.Len() > 0 {
+			reasoning["content"] = []map[string]any{{
 				"type": "reasoning_text",
 				"text": r.responsesReasoningText.String(),
-			}},
+			}}
+		} else if r.responsesReasoningSummary.Len() > 0 {
+			reasoning["summary"] = []map[string]any{{
+				"type": "summary_text",
+				"text": r.responsesReasoningSummary.String(),
+			}}
 		}
 		output = append(output, reasoning)
 	}
-	output = append(output, map[string]any{
-		"type": "message",
-		"role": "assistant",
-		"content": []map[string]any{{
-			"type": "output_text",
-			"text": r.responsesText.String(),
-		}},
-	})
+	if r.responsesText.Len() > 0 {
+		output = append(output, map[string]any{
+			"type": "message",
+			"role": "assistant",
+			"content": []map[string]any{{
+				"type": "output_text",
+				"text": r.responsesText.String(),
+			}},
+		})
+	}
 	return output
 }
 
@@ -852,11 +871,19 @@ func (r *Runtime) chatChunk(delta map[string]any, finishReason *string) protocol
 	}}
 }
 
-func (r *Runtime) anthropicTextDelta(delta string) []protocol.StreamEvent {
+func (r *Runtime) anthropicLogicalTextDelta(action Action) []protocol.StreamEvent {
+	delta := action.DeltaText
 	if delta == "" {
 		return nil
 	}
-	events := r.ensureAnthropicBlock("text", map[string]any{"type": "text", "text": ""})
+	// Logical segment identity, not Anthropic thinking type. Same mode continues
+	// the current text block; mode changes force close/open so one block maps to
+	// one durable segment (and to non-stream content[] entries).
+	blockKey := "answer"
+	if normalizedMode(action.Mode) == "thinking" {
+		blockKey = "thinking"
+	}
+	events := r.ensureAnthropicBlock(blockKey, map[string]any{"type": "text", "text": ""})
 	r.anthropicText.WriteString(delta)
 	events = append(events, protocol.StreamEvent{
 		Event: "content_block_delta",
@@ -864,25 +891,6 @@ func (r *Runtime) anthropicTextDelta(delta string) []protocol.StreamEvent {
 			"type":  "content_block_delta",
 			"index": r.anthropicBlockIndex,
 			"delta": map[string]any{"type": "text_delta", "text": delta},
-		},
-	})
-	return events
-}
-
-func (r *Runtime) anthropicThinkingDelta(delta string) []protocol.StreamEvent {
-	if delta == "" {
-		return nil
-	}
-	// Emit Anthropic thinking blocks so clients that understand them can render
-	// the human-authored reasoning stream. Signature is left empty for lab/mock use.
-	events := r.ensureAnthropicBlock("thinking", map[string]any{"type": "thinking", "thinking": ""})
-	r.anthropicThinking.WriteString(delta)
-	events = append(events, protocol.StreamEvent{
-		Event: "content_block_delta",
-		Data: map[string]any{
-			"type":  "content_block_delta",
-			"index": r.anthropicBlockIndex,
-			"delta": map[string]any{"type": "thinking_delta", "thinking": delta},
 		},
 	})
 	return events
@@ -897,10 +905,12 @@ func (r *Runtime) completeAnthropic(action Action) []protocol.StreamEvent {
 		events = append(events, r.anthropicToolUse(action)...)
 		return append(events, r.anthropicStop(outcome.AnthropicStopReason(), action.StopSequence, action.OutputTokens)...)
 	}
-	if mode == "thinking" && action.OutputText != "" {
-		events = append(events, r.anthropicThinkingDelta(action.OutputText)...)
-	} else if mode != "thinking" && action.OutputText != "" {
-		events = append(events, r.anthropicTextDelta(action.OutputText)...)
+	if action.OutputText != "" {
+		events = append(events, r.anthropicLogicalTextDelta(Action{
+			Kind:      ActionDelta,
+			DeltaText: action.OutputText,
+			Mode:      action.Mode,
+		})...)
 	}
 	events = append(events, r.closeAnthropicBlock()...)
 	return append(events, r.anthropicStop(outcome.AnthropicStopReason(), action.StopSequence, action.OutputTokens)...)

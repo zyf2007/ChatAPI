@@ -23,7 +23,9 @@ export function normalizeChatText(value: string): string {
     .replace(/\\n/g, '\n')
 }
 
-function splitThinkingBlocks(value: string): RenderableContentPart[] {
+// Legacy-only: historical messages stored thinking inside <think> tags in Content.
+// New messages must arrive as typed content_parts and never pass through this path.
+function splitLegacyThinkingBlocks(value: string): RenderableContentPart[] {
   const normalized = normalizeChatText(value)
   const pattern = /<think(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/think>/gi
   const parts: RenderableContentPart[] = []
@@ -264,7 +266,7 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
   const fallback = rawContent.trim()
     ? isRenderableImageUrl(rawContent.trim())
       ? [{ type: 'image', src: rawContent.trim() } satisfies RenderableContentPart]
-      : splitThinkingBlocks(rawContent)
+      : splitLegacyThinkingBlocks(rawContent)
     : []
 
   const parsed = tryParseStructuredContent(rawContent)
@@ -277,7 +279,7 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
       if (isRenderableImageUrl(value)) {
         parts.push({ type: 'image', src: value.trim() })
       } else if (value.trim()) {
-        parts.push(...splitThinkingBlocks(value))
+        parts.push(...splitLegacyThinkingBlocks(value))
       }
       return
     }
@@ -339,7 +341,7 @@ function parseRenderableContent(rawContent: string): RenderableContentPart[] {
         itemType === 'text' ||
         !itemType)
     ) {
-      parts.push(...splitThinkingBlocks(record.text))
+      parts.push(...splitLegacyThinkingBlocks(record.text))
       return
     }
 
@@ -365,13 +367,17 @@ export function renderMessageContent(
   contentParts?: TimelineMessageContentPart[],
 ) {
   const { onImageClick } = options
-  const parts = Array.isArray(contentParts) && contentParts.length > 0
-    ? contentParts.flatMap((part) => {
+  const parts: RenderableContentPart[] = Array.isArray(contentParts) && contentParts.length > 0
+    ? contentParts.flatMap((part): RenderableContentPart[] => {
         if (part.type === 'image' && part.src) {
-          return [{ type: 'image', src: part.src, detail: part.media_type } satisfies RenderableContentPart]
+          return [{ type: 'image', src: part.src, detail: part.media_type }]
         }
-        if (part.type === 'text' && part.text) {
-          return splitThinkingBlocks(part.text)
+        // Typed segments are authoritative: never re-parse <think> out of answer text.
+        if (part.type === 'thinking' && part.text) {
+          return [{ type: 'thinking', text: part.text }]
+        }
+        if ((part.type === 'text' || !part.type) && part.text) {
+          return [{ type: 'text', text: part.text }]
         }
         return []
       })

@@ -257,18 +257,26 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		if getErr != nil {
 			return getErr
 		}
-		existing := conversationstate.FromConversation(conversation).DraftText
-		nextDraft = existing + draftChunkForMode(decision.Text, mode)
+		existing := conversationstate.FromConversation(conversation)
+		outputSegments := appendOutputSegment(existing.OutputSegments, mode, decision.Text, reasoningStreamMode)
+		// DraftText / message.Content are answer-only. Thinking is durable only in
+		// output_segments so literal <think> tags never become synthetic markup.
+		nextDraft = conversationstate.ContentFromSegments(outputSegments)
 		if decision.Terminal {
 			completePreviousState, startErr := s.Pending.StartComplete(conversationID)
 			if startErr != nil {
 				return startErr
 			}
+			preview := conversationstate.PreviewFromSegments(outputSegments)
+			if preview == "" {
+				preview = decision.OutputText
+			}
 			completionInput = common.CompletePendingInput{
 				ConversationID:      conversationID,
 				ResponseID:          responseIDForConversation(s.Pending, conversationID),
 				OutputText:          nextDraft,
-				OutputPreview:       decision.OutputText,
+				OutputSegments:      outputSegments,
+				OutputPreview:       preview,
 				Mode:                mode,
 				ReasoningStreamMode: reasoningStreamMode,
 				OutputPolicy:        decision.Metadata(),
@@ -287,6 +295,7 @@ func (s *Service) UpdateDraft(ctx context.Context, conversationID string, chunk 
 		updated, updateErr = s.Store.UpdateDraft(ctx, common.UpdateDraftInput{
 			ConversationID: conversationID,
 			DraftText:      nextDraft,
+			OutputSegments: outputSegments,
 		})
 		return updateErr
 	})
@@ -439,11 +448,21 @@ func pendingRequestHasBuiltinTool(turn *PendingTurn, kind string) bool {
 	return protocolruntime.RequestSupportsBuiltinTool(turn.NormalizedRequest, kind)
 }
 
-func draftChunkForMode(chunk string, mode string) string {
-	if strings.TrimSpace(mode) != "thinking" || strings.TrimSpace(chunk) == "" {
-		return chunk
+func appendOutputSegment(existing []common.OutputSegment, mode string, text string, reasoningStreamMode string) []common.OutputSegment {
+	if text == "" {
+		return existing
 	}
-	return "<think>" + chunk + "</think>"
+	segments := append([]common.OutputSegment(nil), existing...)
+	mode = conversationstate.SegmentMode(mode)
+	if len(segments) > 0 && segments[len(segments)-1].Mode == mode && segments[len(segments)-1].ReasoningStreamMode == reasoningStreamMode {
+		segments[len(segments)-1].Text += text
+		return segments
+	}
+	return append(segments, common.OutputSegment{
+		Mode:                mode,
+		Text:                text,
+		ReasoningStreamMode: reasoningStreamMode,
+	})
 }
 
 func (s *Service) CompleteConversation(ctx context.Context, input common.CompletePendingInput) (map[string]any, error) {
@@ -480,11 +499,34 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 			s.Pending.RevertFinalize(input.ConversationID, completePreviousState)
 			return getErr
 		}
-		existingDraft := conversationstate.FromConversation(conversationBefore).DraftText
-		input.OutputText = existingDraft + draftChunkForMode(decision.Text, input.Mode)
-		input.OutputPreview = decision.OutputText
-		if input.OutputPreview == "" && decision.Text != "" {
-			input.OutputPreview = decision.Text
+		existingState := conversationstate.FromConversation(conversationBefore)
+		mode := strings.TrimSpace(input.Mode)
+		switch mode {
+		case "tool_call", "tool_result":
+			// Tool payloads are not answer segments. Keep OutputText as the tool
+			// arguments/output while still appending any already-streamed segments.
+			input.OutputSegments = existingState.OutputSegments
+			if strings.TrimSpace(input.OutputText) == "" {
+				input.OutputText = decision.Text
+			}
+			if strings.TrimSpace(input.OutputPreview) == "" {
+				input.OutputPreview = decision.OutputText
+			}
+			if strings.TrimSpace(input.OutputPreview) == "" {
+				input.OutputPreview = decision.Text
+			}
+		default:
+			input.OutputSegments = appendOutputSegment(existingState.OutputSegments, input.Mode, decision.Text, input.ReasoningStreamMode)
+			// Structured segments are the source of truth. Content is answer-only;
+			// thinking-only turns persist empty Content and keep reasoning in metadata.
+			input.OutputText = conversationstate.ContentFromSegments(input.OutputSegments)
+			input.OutputPreview = conversationstate.PreviewFromSegments(input.OutputSegments)
+			if input.OutputPreview == "" {
+				input.OutputPreview = decision.OutputText
+			}
+			if input.OutputPreview == "" && decision.Text != "" && conversationstate.SegmentMode(input.Mode) != "thinking" {
+				input.OutputPreview = decision.Text
+			}
 		}
 		input.OutputPolicy = decision.Metadata()
 		input.OutputTokens = decision.OutputTokens
@@ -519,6 +561,7 @@ func (s *Service) finishCompletedTurn(
 	action := OutputAction{
 		Kind:                TurnControlStreamComplete,
 		OutputText:          completionDelta,
+		OutputSegments:      input.OutputSegments,
 		Mode:                input.Mode,
 		ReasoningStreamMode: input.ReasoningStreamMode,
 		ToolName:            input.ToolName,

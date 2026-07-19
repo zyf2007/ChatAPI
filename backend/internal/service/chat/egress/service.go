@@ -10,17 +10,13 @@ import (
 
 type Service struct{}
 
-func New() *Service {
-	return &Service{}
-}
+func New() *Service { return &Service{} }
 
 func (s *Service) InvalidJSONBody(requestFormat string) map[string]any {
 	return protocol.InvalidJSONError(requestFormat)
 }
 
-func (s *Service) ErrorStatus(err error) int {
-	return protocol.HTTPStatus(err)
-}
+func (s *Service) ErrorStatus(err error) int { return protocol.HTTPStatus(err) }
 
 func (s *Service) ErrorBody(requestFormat string, err error) map[string]any {
 	return protocol.BuildErrorBody(requestFormat, err)
@@ -43,16 +39,41 @@ func (s *Service) CompleteBody(conversation common.Conversation, input common.Co
 		Model:      conversationstate.Model(conversation, "chatapi-lab"),
 		ResponseID: stringValue(conversation.ResponseID, input.ResponseID),
 	}, protocol.TurnResult{
-		ResponseID:   stringValue(conversation.ResponseID, input.ResponseID),
-		OutputText:   message.Content,
-		Mode:         input.Mode,
-		ToolName:     input.ToolName,
-		ToolCallID:   input.ToolCallID,
-		ToolOutput:   stringValue(input.ToolOutput, message.Content),
-		FinishReason: input.FinishReason,
-		StopSequence: input.StopSequence,
-		Usage:        protocol.Usage{OutputTokens: input.OutputTokens},
+		ResponseID:          stringValue(conversation.ResponseID, input.ResponseID),
+		OutputText:          message.Content,
+		OutputSegments:      outputSegmentsFromMessage(message),
+		Mode:                input.Mode,
+		ReasoningStreamMode: input.ReasoningStreamMode,
+		ToolName:            input.ToolName,
+		ToolCallID:          input.ToolCallID,
+		ToolOutput:          stringValue(input.ToolOutput, message.Content),
+		FinishReason:        input.FinishReason,
+		StopSequence:        input.StopSequence,
+		Usage:               protocol.Usage{OutputTokens: input.OutputTokens},
 	})
+}
+
+func outputSegmentsFromMessage(message common.Message) []protocol.OutputSegment {
+	if message.Metadata == nil {
+		return nil
+	}
+	return convertSegments(conversationstate.DecodeOutputSegments(message.Metadata["output_segments"]))
+}
+
+func convertSegments(segments []common.OutputSegment) []protocol.OutputSegment {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]protocol.OutputSegment, 0, len(segments))
+	for _, segment := range segments {
+		if segment.Text == "" {
+			continue
+		}
+		out = append(out, protocol.OutputSegment{
+			Mode: segment.Mode, Text: segment.Text, ReasoningStreamMode: segment.ReasoningStreamMode,
+		})
+	}
+	return out
 }
 
 func requestFormatOfConversation(conversation common.Conversation) string {

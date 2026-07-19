@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "build:embedded": "tsc -b && vite build --outDir ../backend/internal/http/webassets/dist --emptyOutDir",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --experimental-strip-types --test src/hooks/chatWorkspace/composerKeyboard.test.ts",
+    "test:unit": "npm test"
   },
   "dependencies": {
     "dayjs": "^1.11.21",

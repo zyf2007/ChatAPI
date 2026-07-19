@@ -29,6 +29,12 @@ type TurnRequest struct {
 	RawBody          map[string]any
 }
 
+type OutputSegment struct {
+	Mode                string `json:"mode"`
+	Text                string `json:"text"`
+	ReasoningStreamMode string `json:"reasoning_stream_mode,omitempty"`
+}
+
 type TurnResult struct {
 	ResponseID          string
 	OutputText          string
@@ -37,6 +43,7 @@ type TurnResult struct {
 	ToolName            string
 	ToolCallID          string
 	ToolOutput          string
+	OutputSegments      []OutputSegment
 	Usage               Usage
 	FinishReason        string
 	StopSequence        string

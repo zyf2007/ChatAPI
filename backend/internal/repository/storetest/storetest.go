@@ -9,6 +9,7 @@ import (
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/repository/repositorycontract"
+	conversationstate "github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 )
 
 type NewStoreFunc func(t *testing.T) repositorycontract.Store
@@ -1636,25 +1637,40 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("expected two requests, got %#v", requests)
 	}
 
+	draftSegments := []common.OutputSegment{
+		{Mode: "thinking", Text: "alpha", ReasoningStreamMode: "summary"},
+		{Mode: "answer", Text: "beta"},
+		{Mode: "thinking", Text: "gamma", ReasoningStreamMode: "reasoning"},
+		{Mode: "answer", Text: "delta"},
+	}
 	draftConversation, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
 		ConversationID: firstConversation.ID,
-		DraftText:      "draft answer",
+		DraftText:      conversationstate.ContentFromSegments(draftSegments),
+		OutputSegments: draftSegments,
 	})
 	if err != nil {
 		t.Fatalf("update draft: %v", err)
 	}
-	if draftConversation.Metadata["realtime_status"] != "streaming" || draftConversation.Metadata["realtime_draft_text"] != "draft answer" {
+	if draftConversation.Metadata["realtime_status"] != "streaming" || draftConversation.Metadata["realtime_draft_text"] != "betadelta" {
 		t.Fatalf("unexpected draft conversation: %#v", draftConversation)
 	}
+	// Real repository re-read after UpdateDraft — not the in-memory return value alone.
+	reloadedDraft, err := st.GetConversation(ctx, firstConversation.ID)
+	if err != nil {
+		t.Fatalf("reload draft conversation: %v", err)
+	}
+	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(reloadedDraft.Metadata["realtime_output_segments"]), draftSegments)
 
 	completedConversation, completedMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
 		ConversationID:      firstConversation.ID,
 		ResponseID:          "resp_waiting",
-		OutputText:          "",
+		OutputText:          conversationstate.ContentFromSegments(draftSegments),
 		Mode:                "tool_call",
 		ToolName:            "tool_a",
 		ToolCallID:          "call_1",
 		ReasoningStreamMode: "summary",
+		OutputSegments:      draftSegments,
+		OutputPreview:       conversationstate.PreviewFromSegments(draftSegments),
 	})
 	if err != nil {
 		t.Fatalf("complete pending turn: %v", err)
@@ -1662,8 +1678,27 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if completedConversation.MessageCount != 2 || completedConversation.Metadata["realtime_status"] != "closed" {
 		t.Fatalf("unexpected completed conversation: %#v", completedConversation)
 	}
-	if completedMessage.Content != "draft answer" || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != "draft answer" {
+	if completedMessage.Content != "betadelta" || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != "betadelta" {
 		t.Fatalf("unexpected completed message: %#v", completedMessage)
+	}
+	// Real List/Get after Complete — exercises JSON marshal/unmarshal key stability.
+	messages, err := st.ListMessages(ctx, firstConversation.ID)
+	if err != nil {
+		t.Fatalf("list messages after complete: %v", err)
+	}
+	var reloadedMessage common.Message
+	for _, item := range messages {
+		if item.ID == completedMessage.ID {
+			reloadedMessage = item
+			break
+		}
+	}
+	if reloadedMessage.ID == "" {
+		t.Fatalf("completed message missing from ListMessages: %#v", messages)
+	}
+	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(reloadedMessage.Metadata["output_segments"]), draftSegments)
+	if reloadedMessage.Content != "betadelta" {
+		t.Fatalf("reloaded content lost answer-only contract: %q", reloadedMessage.Content)
 	}
 
 	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
@@ -1918,7 +1953,7 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("unexpected expired conversation metadata: %#v", expiredConversation)
 	}
 
-	messages, err := st.ListMessages(ctx, firstConversation.ID)
+	messages, err = st.ListMessages(ctx, firstConversation.ID)
 	if err != nil {
 		t.Fatalf("list messages: %v", err)
 	}
@@ -1992,5 +2027,19 @@ func testConversationRepositoryConversationEvents(t *testing.T, newStore NewStor
 	}
 	if items[0].ID != first.ID || items[1].ID != second.ID {
 		t.Fatalf("unexpected event order: %#v", items)
+	}
+}
+
+func assertOutputSegmentsEqual(t *testing.T, got, want []common.OutputSegment) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("segment count mismatch got=%#v want=%#v", got, want)
+	}
+	for index := range want {
+		if got[index].Mode != want[index].Mode ||
+			got[index].Text != want[index].Text ||
+			got[index].ReasoningStreamMode != want[index].ReasoningStreamMode {
+			t.Fatalf("segment[%d] mismatch got=%#v want=%#v", index, got[index], want[index])
+		}
 	}
 }

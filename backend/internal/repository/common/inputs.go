@@ -195,10 +195,20 @@ type CreateStagedMediaAssetInput struct {
 	RequestID      string
 }
 
+// OutputSegment is the durable ordered unit of assistant output.
+// JSON tags are required: repository metadata is marshaled through encoding/json
+// and reloaded as map[string]any, so exported field names alone are not stable.
+type OutputSegment struct {
+	Mode                string `json:"mode"`
+	Text                string `json:"text"`
+	ReasoningStreamMode string `json:"reasoning_stream_mode,omitempty"`
+}
+
 type CompletePendingInput struct {
 	ConversationID      string
 	ResponseID          string
 	OutputText          string
+	OutputSegments      []OutputSegment
 	OutputPreview       string
 	Mode                string
 	ToolName            string
@@ -214,6 +224,7 @@ type CompletePendingInput struct {
 type UpdateDraftInput struct {
 	ConversationID string
 	DraftText      string
+	OutputSegments []OutputSegment
 }
 
 type AbortPendingInput struct {

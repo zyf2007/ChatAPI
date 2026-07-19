@@ -4,12 +4,15 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/zyf2007/ChatAPI/internal/protocol"
+	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	protocolruntime "github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
 )
 
 type OutputAction struct {
 	Kind                TurnControlKind
 	OutputText          string
+	OutputSegments      []common.OutputSegment
 	Mode                string
 	ToolName            string
 	ToolCallID          string
@@ -46,6 +49,16 @@ func (a OutputAction) Normalized() OutputAction {
 	return a
 }
 
+func protocolOutputSegments(segments []common.OutputSegment) []protocol.OutputSegment {
+	if len(segments) == 0 {
+		return nil
+	}
+	out := make([]protocol.OutputSegment, 0, len(segments))
+	for _, segment := range segments {
+		out = append(out, protocol.OutputSegment{Mode: segment.Mode, Text: segment.Text, ReasoningStreamMode: segment.ReasoningStreamMode})
+	}
+	return out
+}
 func (a OutputAction) Validate() error {
 	a = a.Normalized()
 	switch a.Kind {
@@ -92,6 +105,7 @@ func (a OutputAction) RuntimeAction() protocolruntime.Action {
 		Kind:                a.RuntimeKind(),
 		DeltaText:           a.OutputText,
 		OutputText:          a.OutputText,
+		OutputSegments:      protocolOutputSegments(a.OutputSegments),
 		Mode:                a.Mode,
 		ReasoningStreamMode: a.ReasoningStreamMode,
 		ToolName:            a.ToolName,

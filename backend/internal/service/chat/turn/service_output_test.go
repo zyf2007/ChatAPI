@@ -21,6 +21,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
 	"github.com/zyf2007/ChatAPI/internal/repository/migrations"
 	"github.com/zyf2007/ChatAPI/internal/repository/sqlite"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/conversationstate"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/outputasset"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/outputpolicy"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/pending"
@@ -241,7 +242,7 @@ func TestConcurrentDeltasKeepGuardAndPersistedDraftInSync(t *testing.T) {
 	}
 }
 
-func TestAutomaticThinkingCompletionPersistsMaterializedContentOnce(t *testing.T) {
+func TestAutomaticThinkingCompletionPersistsAnswerOnlyContent(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))
 	if err != nil {
@@ -285,16 +286,108 @@ func TestAutomaticThinkingCompletionPersistsMaterializedContentOnce(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := messages[len(messages)-1].Content
-	if content != "<think>reason </think>" {
-		t.Fatalf("thinking content was rematerialized by persistence: %q", content)
+	last := messages[len(messages)-1]
+	// Thinking-only completion: Content stays empty; durable truth is output_segments.
+	if last.Content != "" {
+		t.Fatalf("thinking leaked into answer-only Content: %q", last.Content)
+	}
+	if strings.Contains(last.Content, "<think>") {
+		t.Fatalf("legacy think tags must not be written: %q", last.Content)
+	}
+	segmentsRaw, _ := last.Metadata["output_segments"]
+	segmentsJSON, _ := json.Marshal(segmentsRaw)
+	if !strings.Contains(string(segmentsJSON), "reason ") {
+		t.Fatalf("thinking segment missing after stop-sequence complete: %#v", last.Metadata["output_segments"])
 	}
 	completed, err := store.GetConversation(ctx, conversation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if completed.LastMessagePreview != "reason " {
-		t.Fatalf("thinking markup leaked into conversation preview: %q", completed.LastMessagePreview)
+		t.Fatalf("thinking-only preview should fall back to thinking text: %q", completed.LastMessagePreview)
+	}
+}
+
+func TestAlternatingSegmentsSurviveDraftReloadAndComplete(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB().Close()
+	if err := migrations.Bootstrap(ctx, store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	request := protocol.TurnRequest{Protocol: protocol.ProtocolResponses, Model: "gpt-4o"}
+	conversation, _, err := store.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_segments", RequestID: "req_segments", ResponseID: "resp_segments",
+		OwnerID: "user_a", RequestFormat: "responses", Model: "gpt-4o", UserContent: "question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := outputpolicy.NewGuard(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := pending.NewPendingRegistry()
+	registry.Add(&turn.PendingTurn{
+		RequestID: "req_segments", ResponseID: "resp_segments", ConversationID: conversation.ID,
+		OwnerID: "user_a", NormalizedRequest: request, OutputGuard: guard,
+		Runtime:   protocolruntime.New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-4o", ResponseID: "resp_segments"}),
+		CreatedAt: time.Now().UTC(), Events: make(chan turn.PendingEvent, 8), Done: make(chan turn.PendingResult, 1),
+	})
+	service := &turn.Service{Store: store, Pending: registry, OwnerIDFromContext: func(context.Context) string { return "user_a" }}
+	steps := []struct {
+		text string
+		mode string
+		rsm  string
+	}{
+		{"alpha", "thinking", "summary"},
+		{"show <think>literal</think> ", "answer", ""},
+		{"gamma", "thinking", "reasoning"},
+		{"delta", "answer", ""},
+	}
+	for _, step := range steps {
+		if _, err := service.UpdateDraft(ctx, conversation.ID, step.text, step.mode, step.rsm); err != nil {
+			t.Fatalf("update draft %s/%s: %v", step.mode, step.text, err)
+		}
+		reloaded, getErr := store.GetConversation(ctx, conversation.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		state := conversationstate.FromConversation(reloaded)
+		if len(state.OutputSegments) == 0 {
+			t.Fatalf("segments lost after draft reload: %#v", reloaded.Metadata["realtime_output_segments"])
+		}
+	}
+	result, err := service.CompleteConversation(ctx, common.CompletePendingInput{
+		ConversationID: conversation.ID, ResponseID: "resp_segments", Mode: "answer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["output_text"] != "show <think>literal</think> delta" {
+		t.Fatalf("complete output_text not answer-only: %#v", result)
+	}
+	messages, err := store.ListMessages(ctx, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	if last.Content != "show <think>literal</think> delta" {
+		t.Fatalf("persisted content changed: %q", last.Content)
+	}
+	segments := conversationstate.DecodeOutputSegments(last.Metadata["output_segments"])
+	if len(segments) != 4 {
+		t.Fatalf("expected 4 segments, got %#v", segments)
+	}
+	want := []string{"thinking:alpha", "answer:show <think>literal</think> ", "thinking:gamma", "answer:delta"}
+	for index, segment := range segments {
+		got := segment.Mode + ":" + segment.Text
+		if got != want[index] {
+			t.Fatalf("segment order/content at %d: got=%q want=%q", index, got, want[index])
+		}
 	}
 }
 

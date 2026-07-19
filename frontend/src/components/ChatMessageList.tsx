@@ -117,6 +117,7 @@ function draftMessageFromItem(item: Extract<VisibleTimelineItem, { kind: 'draft'
     id: item.id,
     role: 'draft',
     content: item.content,
+    content_parts: item.content_parts,
     created_at: item.created_at,
   }
 }
