@@ -2,9 +2,13 @@ package protocol
 
 import (
 	"encoding/json"
+	"regexp"
+	"strings"
 
 	"github.com/google/uuid"
 )
+
+var thinkTagPattern = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
 
 func responseIDWithFallback(result TurnResult, fallback string) string {
 	return stringValue(result.ResponseID, fallback)
@@ -46,26 +50,51 @@ func buildResponsesOutput(result TurnResult) []map[string]any {
 			"output":  stringValue(result.ToolOutput, result.OutputText),
 		}}
 	default:
-		return []map[string]any{{
+		thinking, answer := splitThinkingContent(result.OutputText)
+		output := make([]map[string]any, 0, 2)
+		if thinking != "" {
+			output = append(output, map[string]any{
+				"id":     "rs_" + uuid.NewString(),
+				"type":   "reasoning",
+				"status": "completed",
+				"summary": []map[string]any{{
+					"type": "summary_text",
+					"text": thinking,
+				}},
+				"content": []map[string]any{{
+					"type": "reasoning_text",
+					"text": thinking,
+				}},
+			})
+		}
+		output = append(output, map[string]any{
 			"type": "message",
 			"role": "assistant",
 			"content": []map[string]any{
-				{"type": "output_text", "text": result.OutputText},
+				{"type": "output_text", "text": answer},
 			},
-		}}
+		})
+		return output
 	}
 }
 
 func buildChatCompletionMessage(result TurnResult) map[string]any {
+	if result.Mode == "tool_call" {
+		return map[string]any{
+			"role":       "assistant",
+			"content":    "",
+			"tool_calls": []map[string]any{buildChatCompletionToolCall(result)},
+		}
+	}
+	thinking, answer := splitThinkingContent(result.OutputText)
 	message := map[string]any{
 		"role":    "assistant",
-		"content": result.OutputText,
+		"content": answer,
 	}
-	if result.Mode != "tool_call" {
-		return message
+	if thinking != "" {
+		// Common OpenAI-compatible extension used by many clients for reasoning models.
+		message["reasoning_content"] = thinking
 	}
-	message["content"] = ""
-	message["tool_calls"] = []map[string]any{buildChatCompletionToolCall(result)}
 	return message
 }
 
@@ -81,10 +110,50 @@ func buildChatCompletionToolCall(result TurnResult) map[string]any {
 }
 
 func buildAnthropicContent(result TurnResult) []map[string]any {
-	if result.Mode != "tool_call" {
-		return []map[string]any{{"type": "text", "text": result.OutputText}}
+	if result.Mode == "tool_call" {
+		return []map[string]any{buildAnthropicToolUseBlock(result)}
 	}
-	return []map[string]any{buildAnthropicToolUseBlock(result)}
+	thinking, answer := splitThinkingContent(result.OutputText)
+	content := make([]map[string]any, 0, 2)
+	if thinking != "" {
+		content = append(content, map[string]any{
+			"type":     "thinking",
+			"thinking": thinking,
+		})
+	}
+	if answer != "" || thinking == "" {
+		content = append(content, map[string]any{"type": "text", "text": answer})
+	}
+	return content
+}
+
+// splitThinkingContent extracts <think>...</think> segments written by the
+// workspace draft path and returns (thinking, answer).
+func splitThinkingContent(raw string) (thinking string, answer string) {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	matches := thinkTagPattern.FindAllStringSubmatchIndex(raw, -1)
+	if len(matches) == 0 {
+		return "", raw
+	}
+	var thinkingParts []string
+	var answerParts []string
+	last := 0
+	for _, match := range matches {
+		if match[0] > last {
+			answerParts = append(answerParts, raw[last:match[0]])
+		}
+		if match[2] >= 0 && match[3] >= 0 {
+			part := strings.TrimSpace(raw[match[2]:match[3]])
+			if part != "" {
+				thinkingParts = append(thinkingParts, part)
+			}
+		}
+		last = match[1]
+	}
+	if last < len(raw) {
+		answerParts = append(answerParts, raw[last:])
+	}
+	return strings.TrimSpace(strings.Join(thinkingParts, "\n")), strings.Join(answerParts, "")
 }
 
 func buildAnthropicToolUseBlock(result TurnResult) map[string]any {

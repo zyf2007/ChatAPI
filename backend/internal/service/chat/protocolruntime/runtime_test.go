@@ -275,27 +275,68 @@ func TestRuntimeBuildsChatCompletionToolCallChunks(t *testing.T) {
 	}
 }
 
-func TestRuntimeIgnoresAnthropicThinkingWithoutSignedBlock(t *testing.T) {
+func TestRuntimeEmitsAnthropicThinkingBlocks(t *testing.T) {
 	runtime := New(protocol.ConversationMeta{
 		Protocol: protocol.ProtocolAnthropicMessages,
 		Model:    "claude-test",
 	})
 
 	thinking := runtime.Apply(Action{Kind: ActionDelta, Mode: "thinking", DeltaText: "think"})
-	if len(thinking.StreamEvents) != 0 {
-		t.Fatalf("anthropic thinking without provider signature must not emit official thinking events: %#v", thinking.StreamEvents)
+	if len(thinking.StreamEvents) < 2 {
+		t.Fatalf("expected thinking block start + delta, got %#v", thinking.StreamEvents)
+	}
+	if thinking.StreamEvents[0].Event != "content_block_start" {
+		t.Fatalf("unexpected thinking start: %#v", thinking.StreamEvents[0])
+	}
+	startData := thinking.StreamEvents[0].Data.(map[string]any)
+	block := startData["content_block"].(map[string]any)
+	if block["type"] != "thinking" {
+		t.Fatalf("expected thinking content block, got %#v", block)
+	}
+	delta := thinking.StreamEvents[1].Data.(map[string]any)["delta"].(map[string]any)
+	if delta["type"] != "thinking_delta" || delta["thinking"] != "think" {
+		t.Fatalf("unexpected thinking delta: %#v", delta)
 	}
 
 	text := runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "answer"})
 	done := runtime.Apply(Action{Kind: ActionComplete})
 
-	requireEventOrder(t, append(text.StreamEvents, done.StreamEvents...),
+	requireEventOrder(t, append(append(thinking.StreamEvents, text.StreamEvents...), done.StreamEvents...),
+		"content_block_start",
+		"content_block_delta",
+		"content_block_stop",
 		"content_block_start",
 		"content_block_delta",
 		"content_block_stop",
 		"message_delta",
 		"message_stop",
 	)
+}
+
+func TestRuntimeEmitsChatReasoningContent(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{
+		Protocol: protocol.ProtocolChatCompletions,
+		Model:    "gpt-test",
+	})
+
+	thinking := runtime.Apply(Action{Kind: ActionDelta, Mode: "thinking", DeltaText: "reason"})
+	if len(thinking.StreamEvents) != 1 {
+		t.Fatalf("unexpected thinking events: %#v", thinking.StreamEvents)
+	}
+	first := thinking.StreamEvents[0].Data.(map[string]any)
+	choices := first["choices"].([]map[string]any)
+	delta := choices[0]["delta"].(map[string]any)
+	if delta["reasoning_content"] != "reason" {
+		t.Fatalf("missing chat reasoning_content: %#v", first)
+	}
+
+	answer := runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "hello"})
+	answerData := answer.StreamEvents[0].Data.(map[string]any)
+	answerChoices := answerData["choices"].([]map[string]any)
+	answerDelta := answerChoices[0]["delta"].(map[string]any)
+	if answerDelta["content"] != "hello" {
+		t.Fatalf("unexpected answer delta: %#v", answerData)
+	}
 }
 
 func TestRuntimeBuildsAnthropicToolUseLifecycle(t *testing.T) {

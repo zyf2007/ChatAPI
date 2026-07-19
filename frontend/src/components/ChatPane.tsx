@@ -539,15 +539,16 @@ export function ChatPane(props: ChatPaneProps) {
                   <Typography.Text className="thinking-panel-hint">
                     当前会以{' '}
                     {reasoningStreamMode === 'reasoning' ? 'reasoning' : 'summery'}
-                    输出给调用方
+                    输出给调用方 · Enter 流式输出，Shift+Enter 换行
                   </Typography.Text>
                 </div>
                 <TextArea
                   value={thinkingText}
                   onChange={(event) => setThinkingText(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
                   placeholder={
                     isWaitingForUser
-                      ? '输入要展示给调用方看的思考过程，点击“输出思考”会追加到当前回复草稿里。'
+                      ? '输入思考过程。按 Enter 会立刻流式输出给调用方（和正文一样），Shift+Enter 换行。'
                       : '当前没有等待中的 user 请求。'
                   }
                   autoSize={{ minRows: 4, maxRows: 10 }}
@@ -564,7 +565,7 @@ export function ChatPane(props: ChatPaneProps) {
                   onKeyDown={handleComposerKeyDown}
                   placeholder={
                     isWaitingForUser
-                      ? '输入你作为 assistant 的回复。点“流式输出”会把当前内容追加到这轮回复里，点“结束输出”会结束这一轮。'
+                      ? '输入你作为 assistant 的回复。Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束输出。'
                       : '当前没有等待中的 user 请求。'
                   }
                   autoSize={{ minRows: 4, maxRows: 10 }}
@@ -580,13 +581,13 @@ export function ChatPane(props: ChatPaneProps) {
                 ? '正在发送并等待服务端同步草稿…'
                 : isWaitingForUser
                 ? composerMode === 'assistant_message'
-                  ? '流式输出的片段会保留在本轮回复里，结束输出之后这一轮结束。'
+                  ? 'Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束。片段会保留在本轮回复里。'
                 : composerMode === 'thinking'
-                    ? `思考内容会以 ${
+                    ? `Enter 流式输出思考（${
                         isResponsesConversation && reasoningStreamMode === 'reasoning'
                           ? 'reasoning'
                           : 'summery'
-                      } 追加到当前回复草稿，不会结束这一轮。`
+                      }），Shift+Enter 换行。思考不会结束这一轮。`
                     : composerMode === 'builtin_tool'
                       ? '内置工具会输出 Responses 官方内置工具事件，不会结束这一轮。'
                     : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'

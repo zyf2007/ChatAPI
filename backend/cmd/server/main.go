@@ -20,6 +20,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	platformbrowser "github.com/zyf2007/ChatAPI/internal/platform/browser"
 	platformemail "github.com/zyf2007/ChatAPI/internal/platform/email"
+	platformntfy "github.com/zyf2007/ChatAPI/internal/platform/ntfy"
 	auditrepo "github.com/zyf2007/ChatAPI/internal/repository/audit"
 	authrepo "github.com/zyf2007/ChatAPI/internal/repository/auth"
 	automationrepo "github.com/zyf2007/ChatAPI/internal/repository/automation"
@@ -54,6 +55,7 @@ import (
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
+	ntfynotify "github.com/zyf2007/ChatAPI/internal/service/notification/ntfy"
 )
 
 type runtimeStore interface {
@@ -145,12 +147,18 @@ func run() error {
 	chatSettingsSvc := chatsettings.New(store, cfg)
 	pendingRegistry := pendingsvc.NewPendingRegistry()
 	pendingRegistry.Logger = logFactory.Layer(logging.LayerPending)
+	ntfyNotifySvc := ntfynotify.New(store, platformntfy.NewClient(nil), logFactory.Layer(logging.LayerApp))
 	submitter := &turnsvc.Submitter{
 		Store:   store,
 		Pending: pendingRegistry,
 		OutputEventLimit: func(ctx context.Context) (int, error) {
 			current, err := chatSettingsSvc.Current(ctx)
 			return current.MaxOutputEventsPerMessage, err
+		},
+		Hooks: turnsvc.SubmitHooks{
+			// Only notify when a request becomes waiting for human reply.
+			// Do not wire NotifyText to stream deltas, or every token would spam ntfy.
+			NotifyWaiting: ntfyNotifySvc.NotifyWaiting,
 		},
 	}
 	turnService := &turnsvc.Service{

@@ -3,7 +3,7 @@ package migrationplan
 import (
 	"fmt"
 	"io/fs"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 )
@@ -63,7 +63,9 @@ func LoadSteps(fsys fs.FS, dir string) ([]Step, error) {
 		if err != nil {
 			return nil, err
 		}
-		body, err := fs.ReadFile(fsys, filepath.Join(dir, filename))
+		// embed.FS and other io/fs implementations always use slash-separated paths.
+		// filepath.Join would inject backslashes on Windows and break reads.
+		body, err := fs.ReadFile(fsys, path.Join(dir, filename))
 		if err != nil {
 			return nil, fmt.Errorf("read migration %s: %w", filename, err)
 		}

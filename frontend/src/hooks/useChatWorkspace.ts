@@ -600,9 +600,14 @@ export function useChatWorkspace(isMobile: boolean) {
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== 'Enter') return
 
+    const isAnswerMode = composerMode === 'assistant_message'
+    const isThinkingMode = composerMode === 'thinking'
+    const canStreamChunk = isAnswerMode || isThinkingMode
+
     if (event.altKey) {
       event.preventDefault()
-      if (sending || !isWaitingForUser || composerMode !== 'assistant_message' || !draftBuffer) {
+      // Only answer mode reuses the streamed draft buffer back into the editor.
+      if (sending || !isWaitingForUser || !isAnswerMode || !draftBuffer) {
         return
       }
       setComposer(`${draftBuffer}${composer}`)
@@ -611,7 +616,8 @@ export function useChatWorkspace(isMobile: boolean) {
 
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault()
-      if (sending || !isWaitingForUser || composerMode !== 'assistant_message') {
+      // Ending a turn is only available from answer mode.
+      if (sending || !isWaitingForUser || !isAnswerMode) {
         return
       }
       void handleSend()
@@ -620,9 +626,10 @@ export function useChatWorkspace(isMobile: boolean) {
 
     if (event.shiftKey) return
 
+    // Enter = stream current chunk (answer or thinking), same as clicking the stream button.
     event.preventDefault()
     const textarea = event.currentTarget
-    if (sending || !isWaitingForUser || composerMode !== 'assistant_message' || !normalizeChatText(textarea.value)) {
+    if (sending || !isWaitingForUser || !canStreamChunk || !normalizeChatText(textarea.value)) {
       return
     }
     void handleDraft(textarea.value).finally(() => {

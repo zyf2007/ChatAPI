@@ -135,7 +135,12 @@ func (s *Submitter) Submit(ctx context.Context, input SubmitInput) (*PendingTurn
 	}
 	if s.Hooks.NotifyWaiting != nil {
 		if _, waiting := s.Pending.GetByConversationID(conversationID); waiting {
-			s.Hooks.NotifyWaiting(ctx, input.OwnerID, conversation.Title, input.Request.UserContent)
+			// Prefer the latest user turn text for notifications.
+			notifyText := strings.TrimSpace(input.Request.LastUserContent)
+			if notifyText == "" {
+				notifyText = strings.TrimSpace(input.Request.UserContent)
+			}
+			s.Hooks.NotifyWaiting(ctx, input.OwnerID, conversation.Title, notifyText)
 		}
 	}
 	return turn, conversation, message, nil

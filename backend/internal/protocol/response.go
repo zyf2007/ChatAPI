@@ -34,11 +34,12 @@ func BuildResponseForMeta(meta ConversationMeta, result TurnResult) map[string]a
 			},
 		}
 	default:
+		_, answerText := splitThinkingContent(result.OutputText)
 		body := map[string]any{
 			"id":          responseIDWithFallback(result, "resp_"+uuid.NewString()),
 			"object":      "response",
 			"status":      "completed",
-			"output_text": result.OutputText,
+			"output_text": answerText,
 			"usage": map[string]any{
 				"input_tokens":  usage.InputTokens,
 				"output_tokens": usage.OutputTokens,
