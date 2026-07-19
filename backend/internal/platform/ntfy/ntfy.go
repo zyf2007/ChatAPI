@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
 
-	"mime"
+	"github.com/zyf2007/ChatAPI/internal/platform/urlsafety"
 )
 
 var ErrRedirectBlocked = errors.New("ntfy redirect blocked")
@@ -24,20 +25,22 @@ type Message struct {
 	Text  string
 }
 
+// NewClient builds an ntfy client. When httpClient is nil, a safe dialer client
+// is used so DNS rebinding cannot bypass the restricted-address policy.
 func NewClient(httpClient *http.Client) *Client {
 	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout: 5 * time.Second,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+		httpClient = urlsafety.NewSafeHTTPClient(5*time.Second, nil)
 	}
 	return &Client{httpClient: httpClient}
 }
 
+// NewClientWithDialer builds a client whose transport re-validates addresses at dial time.
+func NewClientWithDialer(timeout time.Duration, dialer *urlsafety.SafeDialer) *Client {
+	return NewClient(urlsafety.NewSafeHTTPClient(timeout, dialer))
+}
+
 func (c *Client) Send(ctx context.Context, message Message) error {
-	if c == nil {
+	if c == nil || c.httpClient == nil {
 		return nil
 	}
 	url := strings.TrimSpace(message.URL)
@@ -58,7 +61,7 @@ func (c *Client) Send(ctx context.Context, message Message) error {
 		return err
 	}
 	defer resp.Body.Close()
-	_, _ = io.CopyN(io.Discard, resp.Body, 1)
+	_, _ = io.CopyN(io.Discard, resp.Body, 64<<10)
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		return ErrRedirectBlocked
 	}

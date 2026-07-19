@@ -17,6 +17,7 @@ import (
 	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
+	usercontrolconfig "github.com/zyf2007/ChatAPI/internal/service/usercontrol/config"
 	usercontrolconversations "github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversations"
 	usercontrolprofile "github.com/zyf2007/ChatAPI/internal/service/usercontrol/profile"
 	"go.uber.org/zap"
@@ -226,6 +227,10 @@ func (h UserHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.UserControl.Config.UpdateUserConfig(r.Context(), pr.UserID, body)
 	if err != nil {
+		if errors.Is(err, usercontrolconfig.ErrInvalidNtfyConfig) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}

@@ -148,6 +148,13 @@ func run() error {
 	pendingRegistry := pendingsvc.NewPendingRegistry()
 	pendingRegistry.Logger = logFactory.Layer(logging.LayerPending)
 	ntfyNotifySvc := ntfynotify.New(store, platformntfy.NewClient(nil), logFactory.Layer(logging.LayerApp))
+	// Safety net for early returns after construction; normal path closes explicitly
+	// after HTTP shutdown (Close is idempotent).
+	defer func() {
+		if err := ntfyNotifySvc.Close(); err != nil {
+			appLogger.Warn("ntfy notify service close failed", zap.Error(err))
+		}
+	}()
 	submitter := &turnsvc.Submitter{
 		Store:   store,
 		Pending: pendingRegistry,
@@ -158,6 +165,7 @@ func run() error {
 		Hooks: turnsvc.SubmitHooks{
 			// Only notify when a request becomes waiting for human reply.
 			// Do not wire NotifyText to stream deltas, or every token would spam ntfy.
+			// NotifyWaiting is non-blocking: the ntfy service enqueues onto a bounded worker pool.
 			NotifyWaiting: ntfyNotifySvc.NotifyWaiting,
 		},
 	}
@@ -253,10 +261,21 @@ func run() error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			_ = server.Close()
+			appLogger.Warn("http server shutdown failed", zap.Error(err))
+			if closeErr := server.Close(); closeErr != nil {
+				appLogger.Warn("http server close failed", zap.Error(closeErr))
+			}
+		}
+		// Close ntfy after HTTP is down so in-flight handlers finish enqueueing first,
+		// then drain/cancel the notification workers with a bounded window.
+		if err := ntfyNotifySvc.Close(); err != nil {
+			appLogger.Warn("ntfy notify service close failed", zap.Error(err))
 		}
 		return nil
 	case serveErr := <-errCh:
+		if err := ntfyNotifySvc.Close(); err != nil {
+			appLogger.Warn("ntfy notify service close failed", zap.Error(err))
+		}
 		return serveErr
 	}
 }
