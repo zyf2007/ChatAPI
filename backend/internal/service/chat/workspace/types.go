@@ -180,9 +180,15 @@ func buildMessageContentParts(message common.Message) []TimelineMessageContentPa
 	if len(parts) != 0 {
 		return parts
 	}
+	// Tool turns own tool payload fields, not ordinary answer/thinking segments.
+	// Historical dirty tool rows may still carry leftover output_segments; ignore them
+	// so workspace displays the tool Content/arguments/output instead of draft text.
+	if isToolResponseMode(message.Metadata) {
+		return nil
+	}
 	// New assistant turns expose typed segments so the workspace never re-parses
-	// tags from Content. Historical messages without segments keep Content as-is;
-	// the frontend may apply legacy <think> fallback only in that case.
+	// tags from Content. Historical messages without segments omit content_parts so
+	// the frontend can apply legacy <think> fallback from Content only in that case.
 	if segments := conversationstate.DecodeOutputSegments(message.Metadata["output_segments"]); len(segments) > 0 {
 		typed := make([]TimelineMessageContentPart, 0, len(segments))
 		for _, segment := range segments {
@@ -203,10 +209,22 @@ func buildMessageContentParts(message common.Message) []TimelineMessageContentPa
 			return typed
 		}
 	}
-	if strings.TrimSpace(message.Content) == "" {
-		return nil
+	// No authoritative typed segments: omit content_parts entirely. Fabricating a
+	// single text part would short-circuit frontend legacy <think> parsing.
+	return nil
+}
+
+func isToolResponseMode(metadata map[string]any) bool {
+	if len(metadata) == 0 {
+		return false
 	}
-	return []TimelineMessageContentPart{{Type: "text", Text: message.Content}}
+	mode, _ := metadata["response_mode"].(string)
+	switch strings.TrimSpace(mode) {
+	case "tool_call", "tool_result":
+		return true
+	default:
+		return false
+	}
 }
 
 func partsFromRequestBody(requestFormat string, body map[string]any) []TimelineMessageContentPart {

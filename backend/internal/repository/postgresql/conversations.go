@@ -550,7 +550,9 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	}
 	draftText, _ := metadata["realtime_draft_text"].(string)
 	finalText := input.OutputText
-	if finalText == "" {
+	// Tool payloads never inherit draft answer text. Only ordinary completions may
+	// fall back to the streamed draft when OutputText is empty.
+	if finalText == "" && input.Mode != "tool_call" && input.Mode != "tool_result" {
 		finalText = draftText
 	}
 	now := time.Now().UTC()
@@ -560,7 +562,11 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 
 	messageMetadata := map[string]any{
 		"response_mode": input.Mode,
-		"output_segments": input.OutputSegments,
+	}
+	// Tool turns store payload in arguments/output. Ordinary answer/thinking segments
+	// do not apply; fail-safe omit output_segments so dirty draft state cannot stick.
+	if input.Mode != "tool_call" && input.Mode != "tool_result" {
+		messageMetadata["output_segments"] = input.OutputSegments
 	}
 	if input.ToolName != "" {
 		messageMetadata["tool_name"] = input.ToolName

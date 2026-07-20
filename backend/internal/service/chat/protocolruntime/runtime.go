@@ -50,12 +50,14 @@ type Runtime struct {
 	responsesOutputIndex      int
 	responsesMessageItemID    string
 	responsesTextPartOpen     bool
-	responsesText             strings.Builder
+	responsesText             strings.Builder // current open answer segment only
+	responsesAnswerAggregate  strings.Builder // response-level concatenation of all answer segments
+	responsesClosedOutput     []map[string]any
 	responsesReasoningItemID  string
 	responsesReasoningMode    string
 	responsesReasoningOpen    bool
-	responsesReasoningText    strings.Builder
-	responsesReasoningSummary strings.Builder
+	responsesReasoningText    strings.Builder // current open reasoning segment only
+	responsesReasoningSummary strings.Builder // current open reasoning segment only
 	responsesLastToolCallID   string
 	responsesLastToolName     string
 	responsesLastToolArgs     string
@@ -379,7 +381,7 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 		"object":      "response",
 		"status":      status,
 		"model":       r.meta.Model,
-		"output_text": r.responsesText.String(),
+		"output_text": r.responsesAnswerAggregate.String(),
 		"output":      r.responsesCompletedOutput(action),
 		"usage":       responsesUsage(action.OutputTokens),
 	}
@@ -612,15 +614,33 @@ func (r *Runtime) closeResponsesTextPart() []protocol.StreamEvent {
 	if !r.responsesTextPartOpen {
 		return nil
 	}
+	// Segment-level close: done text is this segment only. Response-level aggregate
+	// keeps every answer segment so response.output_text stays the full join.
 	text := r.responsesText.String()
+	itemID := r.responsesMessageItemID
+	outputIndex := r.responsesOutputIndex
 	r.responsesTextPartOpen = false
+	r.responsesText.Reset()
+	r.responsesMessageItemID = ""
+	r.responsesAnswerAggregate.WriteString(text)
+	item := map[string]any{
+		"id":     itemID,
+		"type":   "message",
+		"status": "completed",
+		"role":   "assistant",
+		"content": []map[string]any{{
+			"type": "output_text",
+			"text": text,
+		}},
+	}
+	r.responsesClosedOutput = append(r.responsesClosedOutput, item)
 	events := []protocol.StreamEvent{
 		{
 			Event: "response.output_text.done",
 			Data: map[string]any{
 				"type":          "response.output_text.done",
-				"item_id":       r.responsesMessageItemID,
-				"output_index":  r.responsesOutputIndex,
+				"item_id":       itemID,
+				"output_index":  outputIndex,
 				"content_index": 0,
 				"text":          text,
 			},
@@ -629,8 +649,8 @@ func (r *Runtime) closeResponsesTextPart() []protocol.StreamEvent {
 			Event: "response.content_part.done",
 			Data: map[string]any{
 				"type":          "response.content_part.done",
-				"item_id":       r.responsesMessageItemID,
-				"output_index":  r.responsesOutputIndex,
+				"item_id":       itemID,
+				"output_index":  outputIndex,
 				"content_index": 0,
 				"part":          map[string]any{"type": "output_text", "text": text},
 			},
@@ -639,17 +659,8 @@ func (r *Runtime) closeResponsesTextPart() []protocol.StreamEvent {
 			Event: "response.output_item.done",
 			Data: map[string]any{
 				"type":         "response.output_item.done",
-				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":     r.responsesMessageItemID,
-					"type":   "message",
-					"status": "completed",
-					"role":   "assistant",
-					"content": []map[string]any{{
-						"type": "output_text",
-						"text": text,
-					}},
-				},
+				"output_index": outputIndex,
+				"item":         item,
 			},
 		},
 	}
@@ -661,18 +672,33 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 	if !r.responsesReasoningOpen {
 		return nil
 	}
+	// Segment-level close: each reasoning item is independent. Reset builders so the
+	// next thinking segment cannot accumulate prior text or reuse the item id.
 	itemID := r.responsesReasoningItemID
 	mode := r.responsesReasoningMode
+	outputIndex := r.responsesOutputIndex
 	r.responsesReasoningOpen = false
+	r.responsesReasoningItemID = ""
+	r.responsesReasoningMode = ""
 	if mode == "reasoning" {
 		text := r.responsesReasoningText.String()
+		r.responsesReasoningText.Reset()
+		r.responsesReasoningSummary.Reset()
+		item := map[string]any{
+			"id":      itemID,
+			"type":    "reasoning",
+			"status":  "completed",
+			"summary": []any{},
+			"content": []map[string]any{{"type": "reasoning_text", "text": text}},
+		}
+		r.responsesClosedOutput = append(r.responsesClosedOutput, item)
 		events := []protocol.StreamEvent{
 			{
 				Event: "response.reasoning_text.done",
 				Data: map[string]any{
 					"type":          "response.reasoning_text.done",
 					"item_id":       itemID,
-					"output_index":  r.responsesOutputIndex,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"text":          text,
 				},
@@ -682,7 +708,7 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 				Data: map[string]any{
 					"type":          "response.content_part.done",
 					"item_id":       itemID,
-					"output_index":  r.responsesOutputIndex,
+					"output_index":  outputIndex,
 					"content_index": 0,
 					"part":          map[string]any{"type": "reasoning_text", "text": text},
 				},
@@ -691,14 +717,8 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 				Event: "response.output_item.done",
 				Data: map[string]any{
 					"type":         "response.output_item.done",
-					"output_index": r.responsesOutputIndex,
-					"item": map[string]any{
-						"id":      itemID,
-						"type":    "reasoning",
-						"status":  "completed",
-						"summary": []any{},
-						"content": []map[string]any{{"type": "reasoning_text", "text": text}},
-					},
+					"output_index": outputIndex,
+					"item":         item,
 				},
 			},
 		}
@@ -706,13 +726,23 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 		return events
 	}
 	text := r.responsesReasoningSummary.String()
+	r.responsesReasoningText.Reset()
+	r.responsesReasoningSummary.Reset()
+	item := map[string]any{
+		"id":      itemID,
+		"type":    "reasoning",
+		"status":  "completed",
+		"summary": []map[string]any{{"type": "summary_text", "text": text}},
+		"content": []any{},
+	}
+	r.responsesClosedOutput = append(r.responsesClosedOutput, item)
 	events := []protocol.StreamEvent{
 		{
 			Event: "response.reasoning_summary_text.done",
 			Data: map[string]any{
 				"type":          "response.reasoning_summary_text.done",
 				"item_id":       itemID,
-				"output_index":  r.responsesOutputIndex,
+				"output_index":  outputIndex,
 				"summary_index": 0,
 				"text":          text,
 			},
@@ -722,7 +752,7 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 			Data: map[string]any{
 				"type":          "response.reasoning_summary_part.done",
 				"item_id":       itemID,
-				"output_index":  r.responsesOutputIndex,
+				"output_index":  outputIndex,
 				"summary_index": 0,
 				"part":          map[string]any{"type": "summary_text", "text": text},
 			},
@@ -731,14 +761,8 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 			Event: "response.output_item.done",
 			Data: map[string]any{
 				"type":         "response.output_item.done",
-				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":      itemID,
-					"type":    "reasoning",
-					"status":  "completed",
-					"summary": []map[string]any{{"type": "summary_text", "text": text}},
-					"content": []any{},
-				},
+				"output_index": outputIndex,
+				"item":         item,
 			},
 		},
 	}
@@ -776,39 +800,13 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 		})
 	}
 	// Fallback for pure live stream state without a complete segment snapshot.
-	output := make([]map[string]any, 0, 2)
-	if r.responsesReasoningText.Len() > 0 || r.responsesReasoningSummary.Len() > 0 {
-		reasoning := map[string]any{
-			"id":      nonEmpty(r.responsesReasoningItemID, "rs_"+uuid.NewString()),
-			"type":    "reasoning",
-			"status":  "completed",
-			"summary": []map[string]any{},
-			"content": []map[string]any{},
-		}
-		if r.responsesReasoningMode == "reasoning" && r.responsesReasoningText.Len() > 0 {
-			reasoning["content"] = []map[string]any{{
-				"type": "reasoning_text",
-				"text": r.responsesReasoningText.String(),
-			}}
-		} else if r.responsesReasoningSummary.Len() > 0 {
-			reasoning["summary"] = []map[string]any{{
-				"type": "summary_text",
-				"text": r.responsesReasoningSummary.String(),
-			}}
-		}
-		output = append(output, reasoning)
+	// Closed items already carry per-segment text; segment builders were reset on close.
+	if len(r.responsesClosedOutput) > 0 {
+		output := make([]map[string]any, len(r.responsesClosedOutput))
+		copy(output, r.responsesClosedOutput)
+		return output
 	}
-	if r.responsesText.Len() > 0 {
-		output = append(output, map[string]any{
-			"type": "message",
-			"role": "assistant",
-			"content": []map[string]any{{
-				"type": "output_text",
-				"text": r.responsesText.String(),
-			}},
-		})
-	}
-	return output
+	return []map[string]any{}
 }
 
 func (r *Runtime) completeChat(action Action) []protocol.StreamEvent {

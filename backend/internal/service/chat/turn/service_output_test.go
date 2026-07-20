@@ -391,6 +391,143 @@ func TestAlternatingSegmentsSurviveDraftReloadAndComplete(t *testing.T) {
 	}
 }
 
+func TestCompleteToolCallClearsDraftOutputSegments(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB().Close()
+	if err := migrations.Bootstrap(ctx, store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	request := protocol.TurnRequest{Protocol: protocol.ProtocolResponses, Model: "gpt-4o"}
+	conversation, _, err := store.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_tool_clear", RequestID: "req_tool_clear", ResponseID: "resp_tool_clear",
+		OwnerID: "user_a", RequestFormat: "responses", Model: "gpt-4o", UserContent: "question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := outputpolicy.NewGuard(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := pending.NewPendingRegistry()
+	registry.Add(&turn.PendingTurn{
+		RequestID: "req_tool_clear", ResponseID: "resp_tool_clear", ConversationID: conversation.ID,
+		OwnerID: "user_a", NormalizedRequest: request, OutputGuard: guard,
+		Runtime:   protocolruntime.New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-4o", ResponseID: "resp_tool_clear"}),
+		CreatedAt: time.Now().UTC(), Events: make(chan turn.PendingEvent, 8), Done: make(chan turn.PendingResult, 1),
+	})
+	service := &turn.Service{Store: store, Pending: registry, OwnerIDFromContext: func(context.Context) string { return "user_a" }}
+	for _, step := range []struct {
+		text string
+		mode string
+		rsm  string
+	}{
+		{"alpha", "thinking", "summary"},
+		{"beta", "answer", ""},
+	} {
+		if _, err := service.UpdateDraft(ctx, conversation.ID, step.text, step.mode, step.rsm); err != nil {
+			t.Fatalf("update draft: %v", err)
+		}
+	}
+	toolArgs := `{"city":"Hangzhou"}`
+	result, err := service.CompleteConversation(ctx, common.CompletePendingInput{
+		ConversationID: conversation.ID,
+		ResponseID:     "resp_tool_clear",
+		Mode:           "tool_call",
+		ToolName:       "lookup_weather",
+		ToolCallID:     "call_1",
+		OutputText:     toolArgs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["output_text"] != toolArgs {
+		t.Fatalf("tool complete output_text must be tool payload, got %#v", result)
+	}
+	messages, err := store.ListMessages(ctx, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	if last.Content != toolArgs {
+		t.Fatalf("tool message Content must be tool payload, got %q", last.Content)
+	}
+	if last.Metadata["response_mode"] != "tool_call" || last.Metadata["arguments"] != toolArgs || last.Metadata["tool_name"] != "lookup_weather" {
+		t.Fatalf("tool metadata incomplete: %#v", last.Metadata)
+	}
+	if segs := conversationstate.DecodeOutputSegments(last.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("tool_call message must not keep draft output_segments: %#v", segs)
+	}
+}
+
+func TestCompleteToolResultClearsDraftOutputSegments(t *testing.T) {
+	ctx := context.Background()
+	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.DB().Close()
+	if err := migrations.Bootstrap(ctx, store.DB()); err != nil {
+		t.Fatal(err)
+	}
+	request := protocol.TurnRequest{Protocol: protocol.ProtocolResponses, Model: "gpt-4o"}
+	conversation, _, err := store.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_tool_result", RequestID: "req_tool_result", ResponseID: "resp_tool_result",
+		OwnerID: "user_a", RequestFormat: "responses", Model: "gpt-4o", UserContent: "question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := outputpolicy.NewGuard(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := pending.NewPendingRegistry()
+	registry.Add(&turn.PendingTurn{
+		RequestID: "req_tool_result", ResponseID: "resp_tool_result", ConversationID: conversation.ID,
+		OwnerID: "user_a", NormalizedRequest: request, OutputGuard: guard,
+		Runtime:   protocolruntime.New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-4o", ResponseID: "resp_tool_result"}),
+		CreatedAt: time.Now().UTC(), Events: make(chan turn.PendingEvent, 8), Done: make(chan turn.PendingResult, 1),
+	})
+	service := &turn.Service{Store: store, Pending: registry, OwnerIDFromContext: func(context.Context) string { return "user_a" }}
+	if _, err := service.UpdateDraft(ctx, conversation.ID, "stale answer", "answer", ""); err != nil {
+		t.Fatal(err)
+	}
+	toolOutput := `{"ok":true}`
+	result, err := service.CompleteConversation(ctx, common.CompletePendingInput{
+		ConversationID: conversation.ID,
+		ResponseID:     "resp_tool_result",
+		Mode:           "tool_result",
+		ToolCallID:     "call_1",
+		OutputText:     toolOutput,
+		ToolOutput:     toolOutput,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["output_text"] != toolOutput {
+		t.Fatalf("tool_result complete output_text must be tool payload, got %#v", result)
+	}
+	messages, err := store.ListMessages(ctx, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := messages[len(messages)-1]
+	if last.Content != toolOutput {
+		t.Fatalf("tool_result Content must be tool payload, got %q", last.Content)
+	}
+	if last.Metadata["response_mode"] != "tool_result" || last.Metadata["output"] != toolOutput {
+		t.Fatalf("tool_result metadata incomplete: %#v", last.Metadata)
+	}
+	if segs := conversationstate.DecodeOutputSegments(last.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("tool_result message must not keep draft output_segments: %#v", segs)
+	}
+}
+
 func TestImageGenerationPersistsURLAndOnlyStreamsDerivedBase64(t *testing.T) {
 	ctx := context.Background()
 	store, err := sqlite.Open(filepath.Join(t.TempDir(), "chat.sqlite3"))

@@ -363,6 +363,140 @@ func TestRuntimeAnthropicAlternatingModesOpenSeparateTextBlocks(t *testing.T) {
 	}
 }
 
+func TestRuntimeResponsesAlternatingAnswerSegmentsUseDistinctIDs(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
+	steps := []Action{
+		{Kind: ActionDelta, Mode: "answer", DeltaText: "beta"},
+		{Kind: ActionDelta, Mode: "thinking", DeltaText: "alpha", ReasoningStreamMode: "summary"},
+		{Kind: ActionDelta, Mode: "answer", DeltaText: "delta"},
+	}
+	var messageIDs []string
+	var textDones []string
+	for _, step := range steps {
+		result := runtime.Apply(step)
+		for _, event := range result.StreamEvents {
+			switch event.Event {
+			case "response.output_item.added":
+				item := event.Data.(map[string]any)["item"].(map[string]any)
+				if item["type"] == "message" {
+					messageIDs = append(messageIDs, item["id"].(string))
+				}
+			case "response.output_text.done":
+				textDones = append(textDones, event.Data.(map[string]any)["text"].(string))
+			}
+		}
+	}
+	if len(messageIDs) != 2 || messageIDs[0] == "" || messageIDs[0] == messageIDs[1] {
+		t.Fatalf("expected two distinct message item ids, got %#v", messageIDs)
+	}
+	if len(textDones) != 1 || textDones[0] != "beta" {
+		t.Fatalf("first answer done should close only beta before thinking: %#v", textDones)
+	}
+	completed := runtime.Apply(Action{Kind: ActionComplete})
+	for _, event := range completed.StreamEvents {
+		if event.Event == "response.output_text.done" {
+			textDones = append(textDones, event.Data.(map[string]any)["text"].(string))
+		}
+	}
+	if len(textDones) != 2 || textDones[0] != "beta" || textDones[1] != "delta" {
+		t.Fatalf("done texts must be per-segment, got %#v", textDones)
+	}
+	last := completed.StreamEvents[len(completed.StreamEvents)-1]
+	response := last.Data.(map[string]any)["response"].(map[string]any)
+	if response["output_text"] != "betadelta" {
+		t.Fatalf("response.output_text must aggregate all answer segments, got %#v", response["output_text"])
+	}
+	// Completion must not re-emit answer deltas already streamed.
+	for _, event := range completed.StreamEvents {
+		if event.Event == "response.output_text.delta" {
+			t.Fatalf("complete repeated a text delta: %#v", event)
+		}
+	}
+}
+
+func TestRuntimeResponsesAlternatingReasoningSegmentsUseDistinctIDs(t *testing.T) {
+	for _, mode := range []string{"summary", "reasoning"} {
+		t.Run(mode, func(t *testing.T) {
+			runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
+			steps := []Action{
+				{Kind: ActionDelta, Mode: "thinking", DeltaText: "alpha", ReasoningStreamMode: mode},
+				{Kind: ActionDelta, Mode: "answer", DeltaText: "beta"},
+				{Kind: ActionDelta, Mode: "thinking", DeltaText: "gamma", ReasoningStreamMode: mode},
+			}
+			var reasoningIDs []string
+			var doneTexts []string
+			doneEvent := "response.reasoning_summary_text.done"
+			if mode == "reasoning" {
+				doneEvent = "response.reasoning_text.done"
+			}
+			for _, step := range steps {
+				result := runtime.Apply(step)
+				for _, event := range result.StreamEvents {
+					switch event.Event {
+					case "response.output_item.added":
+						item := event.Data.(map[string]any)["item"].(map[string]any)
+						if item["type"] == "reasoning" {
+							reasoningIDs = append(reasoningIDs, item["id"].(string))
+						}
+					case doneEvent:
+						doneTexts = append(doneTexts, event.Data.(map[string]any)["text"].(string))
+					}
+				}
+			}
+			if len(reasoningIDs) != 2 || reasoningIDs[0] == "" || reasoningIDs[0] == reasoningIDs[1] {
+				t.Fatalf("expected two distinct reasoning item ids, got %#v", reasoningIDs)
+			}
+			if len(doneTexts) != 1 || doneTexts[0] != "alpha" {
+				t.Fatalf("first reasoning done should close only alpha: %#v", doneTexts)
+			}
+			completed := runtime.Apply(Action{Kind: ActionComplete})
+			for _, event := range completed.StreamEvents {
+				if event.Event == doneEvent {
+					doneTexts = append(doneTexts, event.Data.(map[string]any)["text"].(string))
+				}
+			}
+			if len(doneTexts) != 2 || doneTexts[0] != "alpha" || doneTexts[1] != "gamma" {
+				t.Fatalf("reasoning done texts must not accumulate across segments: %#v", doneTexts)
+			}
+		})
+	}
+}
+
+func TestRuntimeResponsesSameSegmentAccumulatesIntoSingleDone(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
+	first := runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "be"})
+	second := runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "ta"})
+	var messageIDs []string
+	for _, event := range append(first.StreamEvents, second.StreamEvents...) {
+		if event.Event == "response.output_item.added" {
+			item := event.Data.(map[string]any)["item"].(map[string]any)
+			if item["type"] == "message" {
+				messageIDs = append(messageIDs, item["id"].(string))
+			}
+		}
+	}
+	completed := runtime.Apply(Action{Kind: ActionComplete})
+	var textDones []string
+	for _, event := range completed.StreamEvents {
+		if event.Event == "response.output_text.done" {
+			textDones = append(textDones, event.Data.(map[string]any)["text"].(string))
+		}
+		if event.Event == "response.output_text.delta" {
+			t.Fatalf("complete repeated a text delta: %#v", event)
+		}
+	}
+	if len(messageIDs) != 1 {
+		t.Fatalf("same answer segment must keep one message item: %#v", messageIDs)
+	}
+	if len(textDones) != 1 || textDones[0] != "beta" {
+		t.Fatalf("same-segment done must be full segment text, got %#v", textDones)
+	}
+	response := completed.StreamEvents[len(completed.StreamEvents)-1].Data.(map[string]any)["response"].(map[string]any)
+	if response["output_text"] != "beta" {
+		t.Fatalf("unexpected aggregate output_text: %#v", response["output_text"])
+	}
+}
+
 func TestRuntimeResponsesCompletedOutputMatchesSharedBuilder(t *testing.T) {
 	segments := []protocol.OutputSegment{
 		{Mode: "thinking", Text: "alpha", ReasoningStreamMode: "summary"},

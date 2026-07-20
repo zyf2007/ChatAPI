@@ -503,9 +503,10 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 		mode := strings.TrimSpace(input.Mode)
 		switch mode {
 		case "tool_call", "tool_result":
-			// Tool payloads are not answer segments. Keep OutputText as the tool
-			// arguments/output while still appending any already-streamed segments.
-			input.OutputSegments = existingState.OutputSegments
+			// Tool messages never own ordinary answer/thinking segments. Clear any
+			// draft segments so tool completion cannot inherit leftover stream state
+			// into message.metadata.output_segments or tool Content fallback paths.
+			input.OutputSegments = nil
 			if strings.TrimSpace(input.OutputText) == "" {
 				input.OutputText = decision.Text
 			}

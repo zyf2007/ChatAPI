@@ -1661,16 +1661,20 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}
 	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(reloadedDraft.Metadata["realtime_output_segments"]), draftSegments)
 
+	// Completing as tool_call must not persist draft answer/thinking segments. Tool
+	// payload lives in Content/arguments; output_segments must be empty/omitted.
+	toolArgs := `{"city":"Hangzhou"}`
 	completedConversation, completedMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
 		ConversationID:      firstConversation.ID,
 		ResponseID:          "resp_waiting",
-		OutputText:          conversationstate.ContentFromSegments(draftSegments),
+		OutputText:          toolArgs,
 		Mode:                "tool_call",
 		ToolName:            "tool_a",
 		ToolCallID:          "call_1",
 		ReasoningStreamMode: "summary",
-		OutputSegments:      draftSegments,
-		OutputPreview:       conversationstate.PreviewFromSegments(draftSegments),
+		// Even if a caller still forwards leftover draft segments, storage must drop them.
+		OutputSegments: draftSegments,
+		OutputPreview:  toolArgs,
 	})
 	if err != nil {
 		t.Fatalf("complete pending turn: %v", err)
@@ -1678,8 +1682,14 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if completedConversation.MessageCount != 2 || completedConversation.Metadata["realtime_status"] != "closed" {
 		t.Fatalf("unexpected completed conversation: %#v", completedConversation)
 	}
-	if completedMessage.Content != "betadelta" || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != "betadelta" {
+	if completedMessage.Content != toolArgs || completedMessage.Metadata["tool_name"] != "tool_a" || completedMessage.Metadata["arguments"] != toolArgs {
 		t.Fatalf("unexpected completed message: %#v", completedMessage)
+	}
+	if completedMessage.Metadata["response_mode"] != "tool_call" {
+		t.Fatalf("tool completion lost response_mode: %#v", completedMessage.Metadata)
+	}
+	if segs := conversationstate.DecodeOutputSegments(completedMessage.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("tool_call must not persist output_segments: %#v", segs)
 	}
 	// Real List/Get after Complete — exercises JSON marshal/unmarshal key stability.
 	messages, err := st.ListMessages(ctx, firstConversation.ID)
@@ -1696,9 +1706,11 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	if reloadedMessage.ID == "" {
 		t.Fatalf("completed message missing from ListMessages: %#v", messages)
 	}
-	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(reloadedMessage.Metadata["output_segments"]), draftSegments)
-	if reloadedMessage.Content != "betadelta" {
-		t.Fatalf("reloaded content lost answer-only contract: %q", reloadedMessage.Content)
+	if segs := conversationstate.DecodeOutputSegments(reloadedMessage.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("reloaded tool_call must not keep output_segments: %#v", segs)
+	}
+	if reloadedMessage.Content != toolArgs || reloadedMessage.Metadata["arguments"] != toolArgs {
+		t.Fatalf("reloaded tool payload changed: %#v", reloadedMessage)
 	}
 
 	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
@@ -1715,6 +1727,42 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 	}); !errors.Is(err, common.ErrTurnConflict) {
 		t.Fatalf("expected ErrTurnConflict completing closed turn, got %v", err)
 	}
+
+	// Ordinary assistant completion still persists structured segments (symmetric SQLite/PG).
+	ordinaryConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_segments",
+		RequestID:      "req_segments",
+		ResponseID:     "resp_segments",
+		OwnerID:        "user_a",
+		RequestFormat:  "responses",
+		Model:          "gpt-test",
+		UserContent:    "segmented answer",
+	})
+	if err != nil {
+		t.Fatalf("create ordinary pending turn: %v", err)
+	}
+	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
+		ConversationID: ordinaryConversation.ID,
+		DraftText:      conversationstate.ContentFromSegments(draftSegments),
+		OutputSegments: draftSegments,
+	}); err != nil {
+		t.Fatalf("update ordinary draft: %v", err)
+	}
+	ordinaryCompleted, ordinaryMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
+		ConversationID: ordinaryConversation.ID,
+		ResponseID:     "resp_segments",
+		OutputText:     conversationstate.ContentFromSegments(draftSegments),
+		Mode:           "assistant_message",
+		OutputSegments: draftSegments,
+		OutputPreview:  conversationstate.PreviewFromSegments(draftSegments),
+	})
+	if err != nil {
+		t.Fatalf("complete ordinary pending turn: %v", err)
+	}
+	if ordinaryCompleted.MessageCount != 2 || ordinaryMessage.Content != "betadelta" {
+		t.Fatalf("unexpected ordinary completion: conv=%#v msg=%#v", ordinaryCompleted, ordinaryMessage)
+	}
+	assertOutputSegmentsEqual(t, conversationstate.DecodeOutputSegments(ordinaryMessage.Metadata["output_segments"]), draftSegments)
 
 	abortedResult, err := st.AbortPendingTurnWithEvent(ctx, common.PendingTurnLifecycleMutationInput{
 		ConversationID: secondConversation.ID,
