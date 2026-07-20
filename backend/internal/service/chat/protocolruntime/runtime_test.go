@@ -1,6 +1,7 @@
 package protocolruntime
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
@@ -201,6 +202,191 @@ func TestRuntimeBuildsResponsesToolCallLifecycle(t *testing.T) {
 		"response.output_item.done",
 		"response.completed",
 	)
+}
+
+func TestRuntimeResponsesAnswerThinkingThenToolCallKeepsClosedLedger(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{
+		Protocol:   protocol.ProtocolResponses,
+		Model:      "gpt-test",
+		ResponseID: "resp_test",
+	})
+	var allEvents []protocol.StreamEvent
+	answer := runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "hello"})
+	allEvents = append(allEvents, answer.StreamEvents...)
+	thinking := runtime.Apply(Action{Kind: ActionDelta, Mode: "thinking", DeltaText: "plan", ReasoningStreamMode: "summary"})
+	allEvents = append(allEvents, thinking.StreamEvents...)
+	completed := runtime.Apply(Action{
+		Kind:       ActionComplete,
+		Mode:       "tool_call",
+		ToolName:   "lookup_weather",
+		ToolCallID: "call_1",
+		OutputText: `{"city":"Hangzhou"}`,
+	})
+	allEvents = append(allEvents, completed.StreamEvents...)
+
+	var doneTypes []string
+	var doneItems []map[string]any
+	for _, event := range allEvents {
+		if event.Event != "response.output_item.done" {
+			continue
+		}
+		item := event.Data.(map[string]any)["item"].(map[string]any)
+		doneTypes = append(doneTypes, item["type"].(string))
+		doneItems = append(doneItems, item)
+	}
+	if len(doneTypes) != 3 || doneTypes[0] != "message" || doneTypes[1] != "reasoning" || doneTypes[2] != "function_call" {
+		t.Fatalf("done item order must be message/reasoning/function_call, got %#v", doneTypes)
+	}
+	fc := doneItems[2]
+	if fc["call_id"] != "call_1" || fc["name"] != "lookup_weather" || fc["arguments"] != `{"city":"Hangzhou"}` || fc["status"] != "completed" {
+		t.Fatalf("function_call item fields wrong: %#v", fc)
+	}
+	// Complete path must not re-stream answer/thinking already emitted as deltas.
+	for _, event := range completed.StreamEvents {
+		switch event.Event {
+		case "response.output_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+			t.Fatalf("complete must not re-emit already streamed deltas: %#v", event)
+		}
+	}
+
+	last := completed.StreamEvents[len(completed.StreamEvents)-1]
+	if last.Event != "response.completed" {
+		t.Fatalf("expected response.completed last, got %#v", last)
+	}
+	response := last.Data.(map[string]any)["response"].(map[string]any)
+	if response["output_text"] != "hello" {
+		t.Fatalf("output_text must only aggregate answer, got %#v", response["output_text"])
+	}
+	output := response["output"].([]map[string]any)
+	if len(output) != len(doneItems) {
+		t.Fatalf("completed.output length mismatch: output=%d done=%d", len(output), len(doneItems))
+	}
+	for index := range doneItems {
+		if output[index]["type"] != doneItems[index]["type"] {
+			t.Fatalf("completed.output type order mismatch at %d: %#v vs %#v", index, output[index], doneItems[index])
+		}
+		if output[index]["id"] != doneItems[index]["id"] {
+			t.Fatalf("completed.output item identity mismatch at %d: %#v vs %#v", index, output[index], doneItems[index])
+		}
+	}
+	completedFC := output[2]
+	if completedFC["call_id"] != "call_1" || completedFC["name"] != "lookup_weather" || completedFC["arguments"] != `{"city":"Hangzhou"}` {
+		t.Fatalf("completed function_call fields wrong: %#v", completedFC)
+	}
+}
+
+func TestRuntimeResponsesToolResultCompleteLifecycle(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{
+		Protocol:   protocol.ProtocolResponses,
+		Model:      "gpt-test",
+		ResponseID: "resp_test",
+	})
+	toolOutput := `{"ok":true}`
+	result := runtime.Apply(Action{
+		Kind:       ActionComplete,
+		Mode:       "tool_result",
+		ToolCallID: "call_1",
+		ToolOutput: toolOutput,
+		OutputText: "should_not_win",
+	})
+
+	requireEventOrder(t, result.StreamEvents,
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.completed",
+	)
+	for _, event := range result.StreamEvents {
+		if event.Event == "response.output_text.delta" || event.Event == "response.output_text.done" {
+			t.Fatalf("tool_result must not emit text deltas: %#v", event)
+		}
+	}
+
+	added := result.StreamEvents[0].Data.(map[string]any)["item"].(map[string]any)
+	if added["type"] != "function_call_output" || added["status"] != "in_progress" || added["call_id"] != "call_1" {
+		t.Fatalf("unexpected added item: %#v", added)
+	}
+	done := result.StreamEvents[1].Data.(map[string]any)["item"].(map[string]any)
+	if done["type"] != "function_call_output" || done["status"] != "completed" || done["call_id"] != "call_1" || done["output"] != toolOutput {
+		t.Fatalf("unexpected done item: %#v", done)
+	}
+	if done["id"] == "" || done["id"] != added["id"] {
+		t.Fatalf("tool_result item id must be stable across added/done: added=%#v done=%#v", added, done)
+	}
+	if !strings.HasPrefix(done["id"].(string), "fco_") {
+		t.Fatalf("tool_result item id should use fco_ prefix: %#v", done["id"])
+	}
+
+	response := result.StreamEvents[2].Data.(map[string]any)["response"].(map[string]any)
+	if response["output_text"] != "" {
+		t.Fatalf("pure tool_result output_text must be empty, got %#v", response["output_text"])
+	}
+	output := response["output"].([]map[string]any)
+	if len(output) != 1 {
+		t.Fatalf("expected single completed output item, got %#v", output)
+	}
+	if output[0]["type"] != "function_call_output" || output[0]["call_id"] != "call_1" || output[0]["output"] != toolOutput || output[0]["status"] != "completed" {
+		t.Fatalf("completed.output item mismatch: %#v", output[0])
+	}
+	if output[0]["id"] != done["id"] {
+		t.Fatalf("completed.output must reuse done item identity: %#v vs %#v", output[0], done)
+	}
+
+	shared := protocol.BuildResponsesOutput(protocol.TurnResult{
+		Mode:       "tool_result",
+		ToolCallID: "call_1",
+		ToolOutput: toolOutput,
+		OutputText: "should_not_win",
+	})
+	if len(shared) != 1 || shared[0]["type"] != output[0]["type"] || shared[0]["call_id"] != output[0]["call_id"] || shared[0]["output"] != output[0]["output"] {
+		t.Fatalf("stream completed.output diverged from BuildResponsesOutput: stream=%#v shared=%#v", output, shared)
+	}
+}
+
+func TestRuntimeResponsesAnswerThenToolResultKeepsClosedLedger(t *testing.T) {
+	runtime := New(protocol.ConversationMeta{
+		Protocol:   protocol.ProtocolResponses,
+		Model:      "gpt-test",
+		ResponseID: "resp_test",
+	})
+	runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "before tool"})
+	completed := runtime.Apply(Action{
+		Kind:       ActionComplete,
+		Mode:       "tool_result",
+		ToolCallID: "call_9",
+		ToolOutput: `{"temp":20}`,
+	})
+
+	var doneTypes []string
+	var doneItems []map[string]any
+	for _, event := range completed.StreamEvents {
+		if event.Event != "response.output_item.done" {
+			continue
+		}
+		item := event.Data.(map[string]any)["item"].(map[string]any)
+		doneTypes = append(doneTypes, item["type"].(string))
+		doneItems = append(doneItems, item)
+	}
+	if len(doneTypes) != 2 || doneTypes[0] != "message" || doneTypes[1] != "function_call_output" {
+		t.Fatalf("done order must be message/function_call_output, got %#v", doneTypes)
+	}
+
+	response := completed.StreamEvents[len(completed.StreamEvents)-1].Data.(map[string]any)["response"].(map[string]any)
+	if response["output_text"] != "before tool" {
+		t.Fatalf("output_text must keep pre-tool answer only, got %#v", response["output_text"])
+	}
+	output := response["output"].([]map[string]any)
+	if len(output) != 2 {
+		t.Fatalf("completed.output must contain message + function_call_output, got %#v", output)
+	}
+	if output[0]["type"] != "message" || output[1]["type"] != "function_call_output" {
+		t.Fatalf("completed.output type order wrong: %#v", output)
+	}
+	if output[0]["id"] != doneItems[0]["id"] || output[1]["id"] != doneItems[1]["id"] {
+		t.Fatalf("completed.output must match done item identities")
+	}
+	if output[1]["call_id"] != "call_9" || output[1]["output"] != `{"temp":20}` || output[1]["status"] != "completed" {
+		t.Fatalf("function_call_output fields wrong: %#v", output[1])
+	}
 }
 
 func TestRuntimeBuildsResponsesBuiltinToolEvents(t *testing.T) {

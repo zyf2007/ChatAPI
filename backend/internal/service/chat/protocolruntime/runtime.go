@@ -358,19 +358,26 @@ func (r *Runtime) responsesReasoningDelta(action Action) []protocol.StreamEvent 
 func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 	events := make([]protocol.StreamEvent, 0)
 	mode := normalizedMode(action.Mode)
-	if mode == "tool_call" {
+	switch mode {
+	case "tool_call":
 		events = append(events, r.closeResponsesReasoning()...)
 		events = append(events, r.closeResponsesTextPart()...)
 		events = append(events, r.responsesToolCall(action)...)
-	} else if mode == "thinking" && action.OutputText != "" {
-		events = append(events, r.responsesReasoningDelta(Action{
-			Kind:                ActionDelta,
-			DeltaText:           action.OutputText,
-			Mode:                action.Mode,
-			ReasoningStreamMode: action.ReasoningStreamMode,
-		})...)
-	} else if action.OutputText != "" {
-		events = append(events, r.responsesTextDelta(action.OutputText)...)
+	case "tool_result":
+		events = append(events, r.responsesToolResult(action)...)
+	case "thinking":
+		if action.OutputText != "" {
+			events = append(events, r.responsesReasoningDelta(Action{
+				Kind:                ActionDelta,
+				DeltaText:           action.OutputText,
+				Mode:                action.Mode,
+				ReasoningStreamMode: action.ReasoningStreamMode,
+			})...)
+		}
+	default:
+		if action.OutputText != "" {
+			events = append(events, r.responsesTextDelta(action.OutputText)...)
+		}
 	}
 	events = append(events, r.closeResponsesReasoning()...)
 	events = append(events, r.closeResponsesTextPart()...)
@@ -432,6 +439,14 @@ func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {
 	r.responsesLastToolName = strings.TrimSpace(action.ToolName)
 	r.responsesLastToolArgs = arguments
 	itemID := "fc_" + uuid.NewString()
+	completedItem := map[string]any{
+		"id":        itemID,
+		"type":      "function_call",
+		"status":    "completed",
+		"name":      action.ToolName,
+		"call_id":   callID,
+		"arguments": arguments,
+	}
 	events := []protocol.StreamEvent{
 		{
 			Event: "response.output_item.added",
@@ -475,17 +490,67 @@ func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {
 			Data: map[string]any{
 				"type":         "response.output_item.done",
 				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":        itemID,
-					"type":      "function_call",
-					"status":    "completed",
-					"name":      action.ToolName,
-					"call_id":   callID,
-					"arguments": arguments,
-				},
+				"item":         completedItem,
 			},
 		},
 	)
+	r.responsesClosedOutput = append(r.responsesClosedOutput, completedItem)
+	r.responsesOutputIndex++
+	return events
+}
+
+func (r *Runtime) responsesToolResult(action Action) []protocol.StreamEvent {
+	events := make([]protocol.StreamEvent, 0, 4)
+	events = append(events, r.closeResponsesReasoning()...)
+	events = append(events, r.closeResponsesTextPart()...)
+
+	callID := strings.TrimSpace(action.ToolCallID)
+	if callID == "" {
+		callID = strings.TrimSpace(r.responsesLastToolCallID)
+	}
+	if callID == "" {
+		callID = "call_" + uuid.NewString()
+	}
+	r.responsesLastToolCallID = callID
+
+	// Match protocol.BuildResponsesOutput: ToolOutput wins over OutputText.
+	output := strings.TrimSpace(action.ToolOutput)
+	if output == "" {
+		output = strings.TrimSpace(action.OutputText)
+	}
+	itemID := "fco_" + uuid.NewString()
+	completedItem := map[string]any{
+		"id":      itemID,
+		"type":    "function_call_output",
+		"status":  "completed",
+		"call_id": callID,
+		"output":  output,
+	}
+	events = append(events,
+		protocol.StreamEvent{
+			Event: "response.output_item.added",
+			Data: map[string]any{
+				"type":         "response.output_item.added",
+				"output_index": r.responsesOutputIndex,
+				"item": map[string]any{
+					"id":      itemID,
+					"type":    "function_call_output",
+					"status":  "in_progress",
+					"call_id": callID,
+					"output":  "",
+				},
+			},
+		},
+		protocol.StreamEvent{
+			Event: "response.output_item.done",
+			Data: map[string]any{
+				"type":         "response.output_item.done",
+				"output_index": r.responsesOutputIndex,
+				"item":         completedItem,
+			},
+		},
+	)
+	r.responsesClosedOutput = append(r.responsesClosedOutput, completedItem)
 	r.responsesOutputIndex++
 	return events
 }
@@ -771,7 +836,29 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 }
 
 func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
-	if normalizedMode(action.Mode) == "tool_call" {
+	// Prefer durable ordered segments when present so stream completed.output matches
+	// non-stream BuildResponseForMeta / buildResponsesOutput field-for-field.
+	// Tool modes without OutputSegments fall through to the live ledger below so
+	// previously closed answer/reasoning items stay ordered with function_call(s).
+	if len(action.OutputSegments) > 0 {
+		return protocol.BuildResponsesOutput(protocol.TurnResult{
+			Mode:           action.Mode,
+			OutputText:     action.OutputText,
+			ToolName:       action.ToolName,
+			ToolCallID:     action.ToolCallID,
+			ToolOutput:     action.ToolOutput,
+			OutputSegments: action.OutputSegments,
+		})
+	}
+	// Live stream ledger: closed text/reasoning/tool items in output_index order.
+	if len(r.responsesClosedOutput) > 0 {
+		output := make([]map[string]any, len(r.responsesClosedOutput))
+		copy(output, r.responsesClosedOutput)
+		return output
+	}
+	// Last-resort rebuild when complete arrived without any prior streamed items.
+	switch normalizedMode(action.Mode) {
+	case "tool_call":
 		callID := strings.TrimSpace(action.ToolCallID)
 		if callID == "" {
 			callID = r.responsesLastToolCallID
@@ -787,24 +874,23 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 			"call_id":   callID,
 			"arguments": arguments,
 		}}
-	}
-	// Prefer durable ordered segments when present so stream completed.output matches
-	// non-stream BuildResponseForMeta / buildResponsesOutput field-for-field.
-	if len(action.OutputSegments) > 0 {
-		return protocol.BuildResponsesOutput(protocol.TurnResult{
-			Mode:           action.Mode,
-			OutputText:     action.OutputText,
-			ToolName:       action.ToolName,
-			ToolCallID:     action.ToolCallID,
-			OutputSegments: action.OutputSegments,
-		})
-	}
-	// Fallback for pure live stream state without a complete segment snapshot.
-	// Closed items already carry per-segment text; segment builders were reset on close.
-	if len(r.responsesClosedOutput) > 0 {
-		output := make([]map[string]any, len(r.responsesClosedOutput))
-		copy(output, r.responsesClosedOutput)
-		return output
+	case "tool_result":
+		callID := strings.TrimSpace(action.ToolCallID)
+		if callID == "" {
+			callID = r.responsesLastToolCallID
+		}
+		if callID == "" {
+			callID = "call_" + uuid.NewString()
+		}
+		output := strings.TrimSpace(action.ToolOutput)
+		if output == "" {
+			output = strings.TrimSpace(action.OutputText)
+		}
+		return []map[string]any{{
+			"type":    "function_call_output",
+			"call_id": callID,
+			"output":  output,
+		}}
 	}
 	return []map[string]any{}
 }
