@@ -66,37 +66,56 @@ func TestBuildMessageContentPartsThinkingOnlyTypedSegments(t *testing.T) {
 }
 
 func TestBuildMessageContentPartsIgnoresDirtyToolSegments(t *testing.T) {
+	// Tool payloads may literally contain <think> tags; Content is authoritative typed text.
+	const toolContent = `{"query":"<think>literal</think>"}`
 	for _, mode := range []string{"tool_call", "tool_result"} {
 		t.Run(mode, func(t *testing.T) {
 			message := common.Message{
 				ID: "msg_tool", Role: "assistant",
-				Content: `{"ok":true}`,
+				Content: toolContent,
 				Metadata: map[string]any{
 					"response_mode": mode,
 					"output_segments": []common.OutputSegment{
 						{Mode: "thinking", Text: "stale draft"},
 						{Mode: "answer", Text: "stale answer"},
 					},
-					"arguments": `{"ok":true}`,
-					"output":    `{"ok":true}`,
+					"arguments": toolContent,
+					"output":    toolContent,
 				},
 			}
 			parts := buildMessageContentParts(message)
-			if parts != nil {
-				t.Fatalf("tool response_mode must ignore dirty segments, got %#v", parts)
+			if len(parts) != 1 || parts[0].Type != "text" || parts[0].Text != toolContent {
+				t.Fatalf("tool response_mode must project Content as single text part, got %#v", parts)
 			}
 			item := TimelineItemFromRaw(timelinesvc.Item{
 				ID: message.ID, Kind: "message", CreatedAt: time.Now().UTC(),
 				Message: &message,
 			})
-			if item.Message == nil || item.Message.Content != `{"ok":true}` {
-				t.Fatalf("tool Content must remain visible: %#v", item.Message)
+			if item.Message == nil || item.Message.Content != toolContent {
+				t.Fatalf("tool Content must remain identical: %#v", item.Message)
 			}
-			if item.Message.ContentParts != nil {
-				t.Fatalf("tool content_parts must be omitted: %#v", item.Message.ContentParts)
+			if len(item.Message.ContentParts) != 1 ||
+				item.Message.ContentParts[0].Type != "text" ||
+				item.Message.ContentParts[0].Text != toolContent {
+				t.Fatalf("tool content_parts must be authoritative typed Content: %#v", item.Message.ContentParts)
 			}
 		})
 	}
+	t.Run("empty_content", func(t *testing.T) {
+		message := common.Message{
+			ID: "msg_tool_empty", Role: "assistant", Content: "",
+			Metadata: map[string]any{
+				"response_mode": "tool_call",
+				"output_segments": []common.OutputSegment{
+					{Mode: "thinking", Text: "stale draft"},
+				},
+			},
+		}
+		parts := buildMessageContentParts(message)
+		if parts != nil {
+			t.Fatalf("empty tool Content must omit content_parts, got %#v", parts)
+		}
+	})
 }
 
 func TestBuildMessageContentPartsKeepsRequestBodyMultimodal(t *testing.T) {

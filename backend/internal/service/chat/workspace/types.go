@@ -181,10 +181,14 @@ func buildMessageContentParts(message common.Message) []TimelineMessageContentPa
 		return parts
 	}
 	// Tool turns own tool payload fields, not ordinary answer/thinking segments.
-	// Historical dirty tool rows may still carry leftover output_segments; ignore them
-	// so workspace displays the tool Content/arguments/output instead of draft text.
+	// Historical dirty tool rows may still carry leftover output_segments; ignore them.
+	// Content is the authoritative typed text so the frontend never legacy-parses
+	// tool arguments/output that may literally contain <think>...</think>.
 	if isToolResponseMode(message.Metadata) {
-		return nil
+		if message.Content == "" {
+			return nil
+		}
+		return []TimelineMessageContentPart{{Type: "text", Text: message.Content}}
 	}
 	// New assistant turns expose typed segments so the workspace never re-parses
 	// tags from Content. Historical messages without segments omit content_parts so
