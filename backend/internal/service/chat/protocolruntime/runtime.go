@@ -363,8 +363,6 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 		events = append(events, r.closeResponsesReasoning()...)
 		events = append(events, r.closeResponsesTextPart()...)
 		events = append(events, r.responsesToolCall(action)...)
-	case "tool_result":
-		events = append(events, r.responsesToolResult(action)...)
 	case "thinking":
 		if action.OutputText != "" {
 			events = append(events, r.responsesReasoningDelta(Action{
@@ -375,6 +373,10 @@ func (r *Runtime) completeResponses(action Action) []protocol.StreamEvent {
 			})...)
 		}
 	default:
+		// tool_result streaming lifecycle is intentionally not invented here
+		// (openai-go ResponseOutputItemUnion has no function_call_output).
+		// Protocol-level Tool Result redesign is tracked separately; keep pre-extension
+		// complete behavior: optional text delta only when OutputText is present.
 		if action.OutputText != "" {
 			events = append(events, r.responsesTextDelta(action.OutputText)...)
 		}
@@ -483,62 +485,6 @@ func (r *Runtime) responsesToolCall(action Action) []protocol.StreamEvent {
 				"item_id":      itemID,
 				"output_index": r.responsesOutputIndex,
 				"arguments":    arguments,
-			},
-		},
-		protocol.StreamEvent{
-			Event: "response.output_item.done",
-			Data: map[string]any{
-				"type":         "response.output_item.done",
-				"output_index": r.responsesOutputIndex,
-				"item":         completedItem,
-			},
-		},
-	)
-	r.responsesClosedOutput = append(r.responsesClosedOutput, completedItem)
-	r.responsesOutputIndex++
-	return events
-}
-
-func (r *Runtime) responsesToolResult(action Action) []protocol.StreamEvent {
-	events := make([]protocol.StreamEvent, 0, 4)
-	events = append(events, r.closeResponsesReasoning()...)
-	events = append(events, r.closeResponsesTextPart()...)
-
-	callID := strings.TrimSpace(action.ToolCallID)
-	if callID == "" {
-		callID = strings.TrimSpace(r.responsesLastToolCallID)
-	}
-	if callID == "" {
-		callID = "call_" + uuid.NewString()
-	}
-	r.responsesLastToolCallID = callID
-
-	// Match protocol.BuildResponsesOutput: ToolOutput wins over OutputText.
-	output := strings.TrimSpace(action.ToolOutput)
-	if output == "" {
-		output = strings.TrimSpace(action.OutputText)
-	}
-	itemID := "fco_" + uuid.NewString()
-	completedItem := map[string]any{
-		"id":      itemID,
-		"type":    "function_call_output",
-		"status":  "completed",
-		"call_id": callID,
-		"output":  output,
-	}
-	events = append(events,
-		protocol.StreamEvent{
-			Event: "response.output_item.added",
-			Data: map[string]any{
-				"type":         "response.output_item.added",
-				"output_index": r.responsesOutputIndex,
-				"item": map[string]any{
-					"id":      itemID,
-					"type":    "function_call_output",
-					"status":  "in_progress",
-					"call_id": callID,
-					"output":  "",
-				},
 			},
 		},
 		protocol.StreamEvent{
@@ -836,10 +782,16 @@ func (r *Runtime) closeResponsesReasoning() []protocol.StreamEvent {
 }
 
 func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
-	// Prefer durable ordered segments when present so stream completed.output matches
-	// non-stream BuildResponseForMeta / buildResponsesOutput field-for-field.
-	// Tool modes without OutputSegments fall through to the live ledger below so
-	// previously closed answer/reasoning items stay ordered with function_call(s).
+	// Live stream ledger is authoritative when any output_item.done was already
+	// emitted. Rebuilding from OutputSegments would mint new random IDs and break
+	// response.completed.output identity against prior done events.
+	if len(r.responsesClosedOutput) > 0 {
+		output := make([]map[string]any, len(r.responsesClosedOutput))
+		copy(output, r.responsesClosedOutput)
+		return output
+	}
+	// No live ledger: ordinary complete with durable segments can share the
+	// non-stream BuildResponsesOutput shape (IDs are newly minted here).
 	if len(action.OutputSegments) > 0 {
 		return protocol.BuildResponsesOutput(protocol.TurnResult{
 			Mode:           action.Mode,
@@ -850,15 +802,8 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 			OutputSegments: action.OutputSegments,
 		})
 	}
-	// Live stream ledger: closed text/reasoning/tool items in output_index order.
-	if len(r.responsesClosedOutput) > 0 {
-		output := make([]map[string]any, len(r.responsesClosedOutput))
-		copy(output, r.responsesClosedOutput)
-		return output
-	}
-	// Last-resort rebuild when complete arrived without any prior streamed items.
-	switch normalizedMode(action.Mode) {
-	case "tool_call":
+	// Last-resort rebuild when complete arrived without streamed items or segments.
+	if normalizedMode(action.Mode) == "tool_call" {
 		callID := strings.TrimSpace(action.ToolCallID)
 		if callID == "" {
 			callID = r.responsesLastToolCallID
@@ -873,23 +818,6 @@ func (r *Runtime) responsesCompletedOutput(action Action) []map[string]any {
 			"name":      toolName,
 			"call_id":   callID,
 			"arguments": arguments,
-		}}
-	case "tool_result":
-		callID := strings.TrimSpace(action.ToolCallID)
-		if callID == "" {
-			callID = r.responsesLastToolCallID
-		}
-		if callID == "" {
-			callID = "call_" + uuid.NewString()
-		}
-		output := strings.TrimSpace(action.ToolOutput)
-		if output == "" {
-			output = strings.TrimSpace(action.OutputText)
-		}
-		return []map[string]any{{
-			"type":    "function_call_output",
-			"call_id": callID,
-			"output":  output,
 		}}
 	}
 	return []map[string]any{}

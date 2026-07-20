@@ -26,7 +26,9 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/service/chat/outputpolicy"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/pending"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/protocolruntime"
+	timelinesvc "github.com/zyf2007/ChatAPI/internal/service/chat/timeline"
 	"github.com/zyf2007/ChatAPI/internal/service/chat/turn"
+	"github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 )
 
 func TestUpdateDraftAutomaticallyCompletesOnCrossChunkStop(t *testing.T) {
@@ -498,12 +500,13 @@ func TestCompleteToolResultClearsDraftOutputSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 	toolOutput := `{"ok":true}`
+	// Only ToolOutput is supplied; OutputText must be promoted from ToolOutput so DB Content,
+	// metadata.output, and workspace typed text all carry the same payload.
 	result, err := service.CompleteConversation(ctx, common.CompletePendingInput{
 		ConversationID: conversation.ID,
 		ResponseID:     "resp_tool_result",
 		Mode:           "tool_result",
 		ToolCallID:     "call_1",
-		OutputText:     toolOutput,
 		ToolOutput:     toolOutput,
 	})
 	if err != nil {
@@ -525,6 +528,18 @@ func TestCompleteToolResultClearsDraftOutputSegments(t *testing.T) {
 	}
 	if segs := conversationstate.DecodeOutputSegments(last.Metadata["output_segments"]); len(segs) != 0 {
 		t.Fatalf("tool_result message must not keep draft output_segments: %#v", segs)
+	}
+	// Workspace projection uses Content as authoritative typed text for tool_result.
+	item := workspace.TimelineItemFromRaw(timelinesvc.Item{
+		ID: last.ID, Kind: "message", CreatedAt: last.CreatedAt, Message: &last,
+	})
+	if item.Message == nil || item.Message.Content != toolOutput {
+		t.Fatalf("workspace tool Content must match payload: %#v", item.Message)
+	}
+	if len(item.Message.ContentParts) != 1 ||
+		item.Message.ContentParts[0].Type != "text" ||
+		item.Message.ContentParts[0].Text != toolOutput {
+		t.Fatalf("workspace tool content_parts must be single typed text payload: %#v", item.Message.ContentParts)
 	}
 }
 

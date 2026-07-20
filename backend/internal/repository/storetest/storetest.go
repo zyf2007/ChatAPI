@@ -1728,6 +1728,71 @@ func testConversationRepositoryPendingTurnLifecycle(t *testing.T, newStore NewSt
 		t.Fatalf("expected ErrTurnConflict completing closed turn, got %v", err)
 	}
 
+	// tool_result with empty OutputText must materialize Content/metadata.output from ToolOutput
+	// and must not inherit stale draft answer text (symmetric SQLite/Postgres).
+	toolResultConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
+		ConversationID: "conv_tool_result_payload",
+		RequestID:      "req_tool_result_payload",
+		ResponseID:     "resp_tool_result_payload",
+		OwnerID:        "user_a",
+		RequestFormat:  "responses",
+		Model:          "gpt-test",
+		UserContent:    "tool result payload",
+	})
+	if err != nil {
+		t.Fatalf("create tool_result pending turn: %v", err)
+	}
+	if _, err := st.UpdateDraft(ctx, common.UpdateDraftInput{
+		ConversationID: toolResultConversation.ID,
+		DraftText:      "stale draft answer",
+		OutputSegments: draftSegments,
+	}); err != nil {
+		t.Fatalf("update tool_result draft: %v", err)
+	}
+	toolResultPayload := `{"ok":true}`
+	toolResultCompleted, toolResultMessage, err := st.CompletePendingTurn(ctx, common.CompletePendingInput{
+		ConversationID: toolResultConversation.ID,
+		ResponseID:     "resp_tool_result_payload",
+		Mode:           "tool_result",
+		ToolCallID:     "call_result_1",
+		ToolOutput:     toolResultPayload,
+		// OutputText intentionally empty: repository fail-safe must use ToolOutput.
+		OutputSegments: draftSegments,
+		OutputPreview:  toolResultPayload,
+	})
+	if err != nil {
+		t.Fatalf("complete tool_result pending turn: %v", err)
+	}
+	if toolResultCompleted.MessageCount != 2 || toolResultCompleted.Metadata["realtime_status"] != "closed" {
+		t.Fatalf("unexpected tool_result conversation: %#v", toolResultCompleted)
+	}
+	if toolResultMessage.Content != toolResultPayload {
+		t.Fatalf("tool_result Content must come from ToolOutput, got %q", toolResultMessage.Content)
+	}
+	if toolResultMessage.Metadata["response_mode"] != "tool_result" || toolResultMessage.Metadata["output"] != toolResultPayload {
+		t.Fatalf("tool_result metadata incomplete: %#v", toolResultMessage.Metadata)
+	}
+	if segs := conversationstate.DecodeOutputSegments(toolResultMessage.Metadata["output_segments"]); len(segs) != 0 {
+		t.Fatalf("tool_result must not persist output_segments: %#v", segs)
+	}
+	toolResultMessages, err := st.ListMessages(ctx, toolResultConversation.ID)
+	if err != nil {
+		t.Fatalf("list messages after tool_result complete: %v", err)
+	}
+	var reloadedToolResult common.Message
+	for _, item := range toolResultMessages {
+		if item.ID == toolResultMessage.ID {
+			reloadedToolResult = item
+			break
+		}
+	}
+	if reloadedToolResult.ID == "" {
+		t.Fatalf("tool_result message missing from ListMessages: %#v", toolResultMessages)
+	}
+	if reloadedToolResult.Content != toolResultPayload || reloadedToolResult.Metadata["output"] != toolResultPayload {
+		t.Fatalf("reloaded tool_result payload changed: %#v", reloadedToolResult)
+	}
+
 	// Ordinary assistant completion still persists structured segments (symmetric SQLite/PG).
 	ordinaryConversation, _, err := st.CreatePendingTurn(ctx, common.CreatePendingInput{
 		ConversationID: "conv_segments",

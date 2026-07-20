@@ -507,6 +507,12 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 			// draft segments so tool completion cannot inherit leftover stream state
 			// into message.metadata.output_segments or tool Content fallback paths.
 			input.OutputSegments = nil
+			// tool_result Content/metadata.output share one payload. When callers only
+			// supply ToolOutput, promote it to OutputText before store fail-safes run.
+			// Emptiness is trim-checked; non-empty payload keeps its original text.
+			if mode == "tool_result" && strings.TrimSpace(input.OutputText) == "" && strings.TrimSpace(input.ToolOutput) != "" {
+				input.OutputText = input.ToolOutput
+			}
 			if strings.TrimSpace(input.OutputText) == "" {
 				input.OutputText = decision.Text
 			}
@@ -515,6 +521,9 @@ func (s *Service) CompleteConversation(ctx context.Context, input common.Complet
 			}
 			if strings.TrimSpace(input.OutputPreview) == "" {
 				input.OutputPreview = decision.Text
+			}
+			if strings.TrimSpace(input.OutputPreview) == "" {
+				input.OutputPreview = input.OutputText
 			}
 		default:
 			input.OutputSegments = appendOutputSegment(existingState.OutputSegments, input.Mode, decision.Text, input.ReasoningStreamMode)

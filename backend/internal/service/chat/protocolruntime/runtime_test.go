@@ -1,7 +1,6 @@
 package protocolruntime
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/zyf2007/ChatAPI/internal/protocol"
@@ -272,120 +271,6 @@ func TestRuntimeResponsesAnswerThinkingThenToolCallKeepsClosedLedger(t *testing.
 	completedFC := output[2]
 	if completedFC["call_id"] != "call_1" || completedFC["name"] != "lookup_weather" || completedFC["arguments"] != `{"city":"Hangzhou"}` {
 		t.Fatalf("completed function_call fields wrong: %#v", completedFC)
-	}
-}
-
-func TestRuntimeResponsesToolResultCompleteLifecycle(t *testing.T) {
-	runtime := New(protocol.ConversationMeta{
-		Protocol:   protocol.ProtocolResponses,
-		Model:      "gpt-test",
-		ResponseID: "resp_test",
-	})
-	toolOutput := `{"ok":true}`
-	result := runtime.Apply(Action{
-		Kind:       ActionComplete,
-		Mode:       "tool_result",
-		ToolCallID: "call_1",
-		ToolOutput: toolOutput,
-		OutputText: "should_not_win",
-	})
-
-	requireEventOrder(t, result.StreamEvents,
-		"response.output_item.added",
-		"response.output_item.done",
-		"response.completed",
-	)
-	for _, event := range result.StreamEvents {
-		if event.Event == "response.output_text.delta" || event.Event == "response.output_text.done" {
-			t.Fatalf("tool_result must not emit text deltas: %#v", event)
-		}
-	}
-
-	added := result.StreamEvents[0].Data.(map[string]any)["item"].(map[string]any)
-	if added["type"] != "function_call_output" || added["status"] != "in_progress" || added["call_id"] != "call_1" {
-		t.Fatalf("unexpected added item: %#v", added)
-	}
-	done := result.StreamEvents[1].Data.(map[string]any)["item"].(map[string]any)
-	if done["type"] != "function_call_output" || done["status"] != "completed" || done["call_id"] != "call_1" || done["output"] != toolOutput {
-		t.Fatalf("unexpected done item: %#v", done)
-	}
-	if done["id"] == "" || done["id"] != added["id"] {
-		t.Fatalf("tool_result item id must be stable across added/done: added=%#v done=%#v", added, done)
-	}
-	if !strings.HasPrefix(done["id"].(string), "fco_") {
-		t.Fatalf("tool_result item id should use fco_ prefix: %#v", done["id"])
-	}
-
-	response := result.StreamEvents[2].Data.(map[string]any)["response"].(map[string]any)
-	if response["output_text"] != "" {
-		t.Fatalf("pure tool_result output_text must be empty, got %#v", response["output_text"])
-	}
-	output := response["output"].([]map[string]any)
-	if len(output) != 1 {
-		t.Fatalf("expected single completed output item, got %#v", output)
-	}
-	if output[0]["type"] != "function_call_output" || output[0]["call_id"] != "call_1" || output[0]["output"] != toolOutput || output[0]["status"] != "completed" {
-		t.Fatalf("completed.output item mismatch: %#v", output[0])
-	}
-	if output[0]["id"] != done["id"] {
-		t.Fatalf("completed.output must reuse done item identity: %#v vs %#v", output[0], done)
-	}
-
-	shared := protocol.BuildResponsesOutput(protocol.TurnResult{
-		Mode:       "tool_result",
-		ToolCallID: "call_1",
-		ToolOutput: toolOutput,
-		OutputText: "should_not_win",
-	})
-	if len(shared) != 1 || shared[0]["type"] != output[0]["type"] || shared[0]["call_id"] != output[0]["call_id"] || shared[0]["output"] != output[0]["output"] {
-		t.Fatalf("stream completed.output diverged from BuildResponsesOutput: stream=%#v shared=%#v", output, shared)
-	}
-}
-
-func TestRuntimeResponsesAnswerThenToolResultKeepsClosedLedger(t *testing.T) {
-	runtime := New(protocol.ConversationMeta{
-		Protocol:   protocol.ProtocolResponses,
-		Model:      "gpt-test",
-		ResponseID: "resp_test",
-	})
-	runtime.Apply(Action{Kind: ActionDelta, Mode: "answer", DeltaText: "before tool"})
-	completed := runtime.Apply(Action{
-		Kind:       ActionComplete,
-		Mode:       "tool_result",
-		ToolCallID: "call_9",
-		ToolOutput: `{"temp":20}`,
-	})
-
-	var doneTypes []string
-	var doneItems []map[string]any
-	for _, event := range completed.StreamEvents {
-		if event.Event != "response.output_item.done" {
-			continue
-		}
-		item := event.Data.(map[string]any)["item"].(map[string]any)
-		doneTypes = append(doneTypes, item["type"].(string))
-		doneItems = append(doneItems, item)
-	}
-	if len(doneTypes) != 2 || doneTypes[0] != "message" || doneTypes[1] != "function_call_output" {
-		t.Fatalf("done order must be message/function_call_output, got %#v", doneTypes)
-	}
-
-	response := completed.StreamEvents[len(completed.StreamEvents)-1].Data.(map[string]any)["response"].(map[string]any)
-	if response["output_text"] != "before tool" {
-		t.Fatalf("output_text must keep pre-tool answer only, got %#v", response["output_text"])
-	}
-	output := response["output"].([]map[string]any)
-	if len(output) != 2 {
-		t.Fatalf("completed.output must contain message + function_call_output, got %#v", output)
-	}
-	if output[0]["type"] != "message" || output[1]["type"] != "function_call_output" {
-		t.Fatalf("completed.output type order wrong: %#v", output)
-	}
-	if output[0]["id"] != doneItems[0]["id"] || output[1]["id"] != doneItems[1]["id"] {
-		t.Fatalf("completed.output must match done item identities")
-	}
-	if output[1]["call_id"] != "call_9" || output[1]["output"] != `{"temp":20}` || output[1]["status"] != "completed" {
-		t.Fatalf("function_call_output fields wrong: %#v", output[1])
 	}
 }
 
@@ -683,7 +568,84 @@ func TestRuntimeResponsesSameSegmentAccumulatesIntoSingleDone(t *testing.T) {
 	}
 }
 
-func TestRuntimeResponsesCompletedOutputMatchesSharedBuilder(t *testing.T) {
+func TestRuntimeResponsesCompletedOutputPrefersLiveLedgerIdentity(t *testing.T) {
+	// Ordinary live complete often carries OutputSegments. completed.output must still
+	// reuse already-done item identities instead of rebuilding random IDs via the shared builder.
+	segments := []protocol.OutputSegment{
+		{Mode: "answer", Text: "hello"},
+		{Mode: "thinking", Text: "plan", ReasoningStreamMode: "summary"},
+		{Mode: "answer", Text: "world"},
+	}
+	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
+	var doneItems []map[string]any
+	for _, segment := range segments {
+		result := runtime.Apply(Action{
+			Kind: ActionDelta, Mode: segment.Mode, DeltaText: segment.Text, ReasoningStreamMode: segment.ReasoningStreamMode,
+		})
+		for _, event := range result.StreamEvents {
+			if event.Event != "response.output_item.done" {
+				continue
+			}
+			doneItems = append(doneItems, event.Data.(map[string]any)["item"].(map[string]any))
+		}
+	}
+	completed := runtime.Apply(Action{Kind: ActionComplete, OutputSegments: segments})
+	// Close still-open items on complete, then take final done set for identity checks.
+	for _, event := range completed.StreamEvents {
+		if event.Event != "response.output_item.done" {
+			continue
+		}
+		doneItems = append(doneItems, event.Data.(map[string]any)["item"].(map[string]any))
+	}
+	last := completed.StreamEvents[len(completed.StreamEvents)-1]
+	if last.Event != "response.completed" {
+		t.Fatalf("expected response.completed, got %#v", last)
+	}
+	response := last.Data.(map[string]any)["response"].(map[string]any)
+	if response["output_text"] != "helloworld" {
+		t.Fatalf("output_text must aggregate answers only, got %#v", response["output_text"])
+	}
+	streamOutput := response["output"].([]map[string]any)
+	if len(streamOutput) != len(doneItems) {
+		t.Fatalf("completed.output length mismatch: output=%d done=%d", len(streamOutput), len(doneItems))
+	}
+	for index := range doneItems {
+		if streamOutput[index]["id"] != doneItems[index]["id"] {
+			t.Fatalf("completed.output identity mismatch at %d: %#v vs %#v", index, streamOutput[index], doneItems[index])
+		}
+		if streamOutput[index]["type"] != doneItems[index]["type"] {
+			t.Fatalf("completed.output type mismatch at %d: %#v vs %#v", index, streamOutput[index], doneItems[index])
+		}
+		switch streamOutput[index]["type"] {
+		case "message":
+			streamText := messageOutputText(streamOutput[index])
+			doneText := messageOutputText(doneItems[index])
+			if streamText == "" || streamText != doneText {
+				t.Fatalf("message text mismatch at %d: stream=%q done=%q item=%#v", index, streamText, doneText, streamOutput[index])
+			}
+		case "reasoning":
+			streamText := reasoningOutputText(streamOutput[index])
+			doneText := reasoningOutputText(doneItems[index])
+			if streamText == "" || streamText != doneText {
+				t.Fatalf("reasoning text mismatch at %d: stream=%q done=%q item=%#v", index, streamText, doneText, streamOutput[index])
+			}
+		}
+	}
+	// Shared builder remains valid for non-stream / no-live-ledger shapes only.
+	// With a live ledger present we deliberately do not require random ID equality.
+	nonStream := protocol.BuildResponsesOutput(protocol.TurnResult{OutputSegments: segments})
+	if len(nonStream) != len(streamOutput) {
+		t.Fatalf("shape length mismatch stream=%d shared=%d", len(streamOutput), len(nonStream))
+	}
+	for index := range nonStream {
+		if streamOutput[index]["type"] != nonStream[index]["type"] {
+			t.Fatalf("type shape mismatch at %d: stream=%v shared=%v", index, streamOutput[index]["type"], nonStream[index]["type"])
+		}
+	}
+}
+
+func TestRuntimeResponsesCompletedOutputSharedBuilderWithoutLiveLedger(t *testing.T) {
+	// Without prior deltas there is no live ledger; complete may rebuild from OutputSegments.
 	segments := []protocol.OutputSegment{
 		{Mode: "thinking", Text: "alpha", ReasoningStreamMode: "summary"},
 		{Mode: "answer", Text: "beta"},
@@ -691,11 +653,6 @@ func TestRuntimeResponsesCompletedOutputMatchesSharedBuilder(t *testing.T) {
 		{Mode: "answer", Text: "delta"},
 	}
 	runtime := New(protocol.ConversationMeta{Protocol: protocol.ProtocolResponses, Model: "gpt-test", ResponseID: "resp_test"})
-	for _, segment := range segments {
-		runtime.Apply(Action{
-			Kind: ActionDelta, Mode: segment.Mode, DeltaText: segment.Text, ReasoningStreamMode: segment.ReasoningStreamMode,
-		})
-	}
 	completed := runtime.Apply(Action{Kind: ActionComplete, OutputSegments: segments})
 	last := completed.StreamEvents[len(completed.StreamEvents)-1]
 	response := last.Data.(map[string]any)["response"].(map[string]any)
@@ -718,7 +675,6 @@ func TestRuntimeResponsesCompletedOutputMatchesSharedBuilder(t *testing.T) {
 		if streamSummary != nonSummary || streamContent != nonContent {
 			t.Fatalf("reasoning field drift at %d stream=%#v non=%#v", index, streamOutput[index], nonStream[index])
 		}
-		// summary-mode must not populate content; reasoning-mode must not populate summary.
 		if nonSummary > 0 && nonContent > 0 {
 			t.Fatalf("both summary and content populated: %#v", nonStream[index])
 		}
@@ -740,6 +696,29 @@ func asMapSlice(value any) []map[string]any {
 	default:
 		return nil
 	}
+}
+
+func messageOutputText(item map[string]any) string {
+	for _, part := range asMapSlice(item["content"]) {
+		if text, ok := part["text"].(string); ok {
+			return text
+		}
+	}
+	return ""
+}
+
+func reasoningOutputText(item map[string]any) string {
+	for _, part := range asMapSlice(item["summary"]) {
+		if text, ok := part["text"].(string); ok {
+			return text
+		}
+	}
+	for _, part := range asMapSlice(item["content"]) {
+		if text, ok := part["text"].(string); ok {
+			return text
+		}
+	}
+	return ""
 }
 func TestRuntimeEmitsChatReasoningContent(t *testing.T) {
 	runtime := New(protocol.ConversationMeta{

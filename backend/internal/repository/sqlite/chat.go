@@ -838,7 +838,11 @@ func (s *Store) CompletePendingTurn(ctx context.Context, input common.CompletePe
 	finalText := input.OutputText
 	// Tool payloads never inherit draft answer text. Only ordinary completions may
 	// fall back to the streamed draft when OutputText is empty.
-	if finalText == "" && input.Mode != "tool_call" && input.Mode != "tool_result" {
+	// tool_result Content must still materialize from ToolOutput when OutputText is
+	// empty so message.Content, metadata.output, and workspace typed text stay aligned.
+	if input.Mode == "tool_result" {
+		finalText = stringValue(finalText, input.ToolOutput)
+	} else if finalText == "" && input.Mode != "tool_call" {
 		finalText = draftText
 	}
 	now := time.Now().UTC()
