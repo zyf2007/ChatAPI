@@ -293,6 +293,10 @@ func TestRecordingCapturesManualActionsAndPersistsDraft(t *testing.T) {
 		Action: turnsvc.OutputAction{Kind: turnsvc.TurnControlStreamDelta, OutputText: "hello", Mode: "answer"},
 	}})
 	service.ControlApplied(context.Background(), controlsvc.AppliedCommand{Command: controlsvc.Command{
+		OwnerID: "owner", ConversationID: "conv", RequestID: "req", Source: controlsvc.SourceIM,
+		Action: turnsvc.OutputAction{Kind: turnsvc.TurnControlStreamDelta, OutputText: "wechat", Mode: "answer"},
+	}})
+	service.ControlApplied(context.Background(), controlsvc.AppliedCommand{Command: controlsvc.Command{
 		OwnerID: "owner", ConversationID: "conv", RequestID: "req", Source: controlsvc.SourceAutomation,
 		Action: turnsvc.OutputAction{Kind: turnsvc.TurnControlStreamDelta, OutputText: "ignored", Mode: "answer"},
 	}})
@@ -300,10 +304,10 @@ func TestRecordingCapturesManualActionsAndPersistsDraft(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Steps) != 1 || state.Steps[0].Action.Text != "hello" {
+	if len(state.Steps) != 2 || state.Steps[0].Action.Text != "hello" || state.Steps[1].Action.Text != "wechat" {
 		t.Fatalf("unexpected recorded steps: %#v", state.Steps)
 	}
-	if state.DraftRule == nil || state.DraftRule.Enabled || len(state.DraftRule.Steps) != 1 {
+	if state.DraftRule == nil || state.DraftRule.Enabled || len(state.DraftRule.Steps) != 2 {
 		t.Fatalf("unexpected draft rule: %#v", state.DraftRule)
 	}
 	snapshot := service.StateSnapshot("owner")

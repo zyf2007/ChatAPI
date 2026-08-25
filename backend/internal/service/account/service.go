@@ -3,6 +3,7 @@ package account
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -18,8 +19,9 @@ var (
 )
 
 type Service struct {
-	store auth.Store
-	now   func() time.Time
+	store       auth.Store
+	now         func() time.Time
+	revokeOwner func(context.Context, string) error
 }
 
 type CreateUserInput struct {
@@ -57,6 +59,12 @@ func NewService(dataStore auth.Store) *Service {
 	return &Service{
 		store: dataStore,
 		now:   func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (s *Service) SetOwnerRevoker(revoke func(context.Context, string) error) {
+	if s != nil {
+		s.revokeOwner = revoke
 	}
 }
 
@@ -142,12 +150,18 @@ func (s *Service) CreateUser(ctx context.Context, input CreateUserInput) (common
 }
 
 func (s *Service) UpdateUser(ctx context.Context, input UpdateUserInput) (common.User, error) {
+	userID := strings.TrimSpace(input.ID)
 	passwordHash, err := resolvePasswordHash(strings.TrimSpace(input.Password), strings.TrimSpace(input.PasswordHash))
 	if err != nil {
 		return common.User{}, err
 	}
+	if !input.IsActive && s.revokeOwner != nil {
+		if err := s.revokeOwner(ctx, userID); err != nil {
+			return common.User{}, err
+		}
+	}
 	return s.store.UpdateUser(ctx, common.UpdateUserInput{
-		ID:           strings.TrimSpace(input.ID),
+		ID:           userID,
 		Username:     strings.TrimSpace(input.Username),
 		Email:        normalizeEmail(input.Email),
 		PasswordHash: passwordHash,
@@ -197,7 +211,13 @@ func (s *Service) PreviewDeletion(ctx context.Context, userID string) (common.Us
 }
 
 func (s *Service) DeleteUser(ctx context.Context, userID string) error {
-	return s.store.DeleteUserAccount(ctx, strings.TrimSpace(userID))
+	userID = strings.TrimSpace(userID)
+	if s.revokeOwner != nil {
+		if err := s.revokeOwner(ctx, userID); err != nil {
+			return err
+		}
+	}
+	return s.store.DeleteUserAccount(ctx, userID)
 }
 
 func (s *Service) TransferOwnership(ctx context.Context, sourceUserID string, targetUserID string) (common.UserOwnershipTransferResult, error) {
@@ -248,5 +268,9 @@ func resolvePasswordHash(passwordText string, existingHash string) (string, erro
 	if passwordText == "" {
 		return existingHash, nil
 	}
-	return password.Hash(passwordText)
+	hash, err := password.Hash(passwordText)
+	if err != nil {
+		return "", fmt.Errorf("hash password: %w", err)
+	}
+	return hash, nil
 }

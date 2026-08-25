@@ -130,6 +130,13 @@ func New(ctx context.Context, options Options) (_ *App, err error) {
 			expirePendingLoop(ctx, app.services.Turn, app.services.ChatSettings, app.logger)
 		},
 		func(ctx context.Context) {
+			if app.services.IM != nil {
+				if err := app.services.IM.Run(ctx); err != nil && ctx.Err() == nil {
+					app.logger.Warn("IM service stopped", zap.Error(err))
+				}
+			}
+		},
+		func(ctx context.Context) {
 			storageVacuumLoop(ctx, app.Config, app.store, app.services.Audit, app.logger)
 		},
 	}
@@ -237,6 +244,7 @@ func (a *App) Close() {
 	})
 }
 
+// pi-lens-ignore: go-bare-error
 func ModeFromArgs(args []string) (config.Mode, error) {
 	if len(args) == 0 || strings.TrimSpace(args[0]) == "serve" {
 		return config.ModeServe, nil
@@ -247,10 +255,11 @@ func ModeFromArgs(args []string) (config.Mode, error) {
 	return "", fmt.Errorf("unknown mode %q (expected serve or lab)", args[0])
 }
 
+// pi-lens-ignore: go-bare-error
 func DetectBackendRoot() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get working directory: %w", err)
 	}
 	return DetectBackendRootFrom(wd), nil
 }

@@ -24,6 +24,7 @@ const (
 	LayerMigrate     = "migrate"
 	LayerPlatform    = "platform"
 	LayerAudit       = "audit"
+	LayerIM          = "im"
 )
 
 type Config struct {

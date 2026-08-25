@@ -57,6 +57,8 @@ import (
 	turnquerysvc "github.com/zyf2007/ChatAPI/internal/service/chat/turnquery"
 	workspacesvc "github.com/zyf2007/ChatAPI/internal/service/chat/workspace"
 	workspacesettings "github.com/zyf2007/ChatAPI/internal/service/chat/workspace/settings"
+	imsvc "github.com/zyf2007/ChatAPI/internal/service/im"
+	"github.com/zyf2007/ChatAPI/internal/service/im/clawbot"
 	ntfynotify "github.com/zyf2007/ChatAPI/internal/service/notification/ntfy"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol"
 	"github.com/zyf2007/ChatAPI/internal/service/usercontrol/conversationretention"
@@ -66,6 +68,7 @@ type Services struct {
 	Turn         *turnsvc.Service
 	ChatSettings *chatsettings.Service
 	Audit        *auditsvc.Service
+	IM           *imsvc.Service
 }
 
 type applicationInput struct {
@@ -116,6 +119,7 @@ type chatModule struct {
 	workspaceHub       *workspacesvc.Hub
 	events             *chatevents.Dispatcher
 	automation         *automationsvc.Service
+	im                 *imsvc.Service
 	notifications      *ntfynotify.Service
 	outputUploader     httphandler.OutputImageUploader
 }
@@ -132,6 +136,7 @@ func assembleApplication(ctx context.Context, input applicationInput) (applicati
 		return applicationResult{}, err
 	}
 	chat := buildChatModule(input, auth)
+	auth.accounts.SetOwnerRevoker(chat.im.RevokeOwner)
 	admin, err := buildAdminModule(input, auth, chat)
 	if err != nil {
 		_ = chat.notifications.Close()
@@ -139,7 +144,7 @@ func assembleApplication(ctx context.Context, input applicationInput) (applicati
 	}
 	return applicationResult{
 		router:        buildRouter(input, auth, chat, admin),
-		services:      Services{Turn: chat.turn, ChatSettings: chat.settings, Audit: auth.audit},
+		services:      Services{Turn: chat.turn, ChatSettings: chat.settings, Audit: auth.audit, IM: chat.im},
 		notifications: chat.notifications,
 	}, nil
 }
@@ -199,9 +204,11 @@ func buildChatModule(input applicationInput, auth authModule) chatModule {
 	automationSettings := automationsettings.New(store)
 	automationEvents := automationsvc.NewDispatcher(workspacesvc.NewAutomationRealtimePublisher(hub))
 	automation := automationsvc.New(automationsvc.Deps{Rules: store, ModelKeys: store, Control: control, Pending: pending, Events: automationEvents, Logger: logger(logging.LayerTurn), Settings: automationSettings})
+	imService := imsvc.NewService(store, pending, control, cfg.MasterKey, logger(logging.LayerIM), clawbot.NewProvider(nil))
 	workspace.SetAutomation(automation)
 	control.Subscribe(automation)
 	events.Subscribe(automation)
+	events.Subscribe(imService)
 	mediaSettings := preprocesssettings.New(store, cfg)
 	mediaStore := localstore.Store{RootDir: cfg.MediaDerivedDir}
 	outputImages := outputassetsvc.New(cfg, store, mediaStore, input.mediaProcessor)
@@ -217,7 +224,7 @@ func buildChatModule(input applicationInput, auth authModule) chatModule {
 		turn: turn, query: query, control: control, timeline: timeline, ingress: ingresssvc.New(turn), streaming: streamingsvc.New(),
 		egress: egress, catalog: catalogsvc.New(auth.modelKeys), settings: settings, mediaSettings: mediaSettings,
 		realtimeSettings: realtimeSettings, automationSettings: automationSettings, workspaceHub: hub,
-		events: events, automation: automation, notifications: notifications, outputUploader: turn,
+		events: events, automation: automation, im: imService, notifications: notifications, outputUploader: turn,
 	}
 }
 
@@ -265,6 +272,7 @@ func buildRouter(input applicationInput, auth authModule, chat chatModule, admin
 		App:       httphandler.AppAPIHandler{Turn: chat.turn, Query: chat.query, Timeline: chat.timeline, Logger: logger(logging.LayerTurnQuery)},
 		Auth:      httphandler.AuthHandler{Config: cfg, LocalAuth: auth.local, Verification: auth.verification, Policy: auth.policy, Settings: auth.settings, GeeTest: auth.geetest, TOTP: auth.totp, OIDC: auth.oidc, Audit: auth.audit, LoginLimiter: auth.loginLimiter, Sessions: auth.sessions, Logger: logger(logging.LayerAuth)},
 		User:      httphandler.UserHandler{Config: cfg, UserControl: admin.user, Timeline: chat.timeline, Logger: logger(logging.LayerAuth)},
+		IM:        httphandler.IMHandler{Service: chat.im},
 		Admin:     httphandler.AdminHandler{Control: admin.admin, Timeline: chat.timeline, Audit: auth.audit, Logger: logger(logging.LayerAudit), Monitoring: admin.monitoring},
 		Lab:       httphandler.LabHandler{Config: cfg, Query: chat.query, Turn: chat.turn, Control: chat.control, Logger: logger(logging.LayerHTTP)},
 		Workspace: httphandler.WorkspaceHandler{Hub: chat.workspaceHub, Logger: logger(logging.LayerHTTP)},

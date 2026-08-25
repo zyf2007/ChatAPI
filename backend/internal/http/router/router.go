@@ -32,6 +32,7 @@ type Deps struct {
 	App       httphandler.AppAPIHandler
 	Auth      httphandler.AuthHandler
 	User      httphandler.UserHandler
+	IM        httphandler.IMHandler
 	Admin     httphandler.AdminHandler
 	Lab       httphandler.LabHandler
 	Workspace httphandler.WorkspaceHandler
@@ -157,6 +158,10 @@ func New(deps Deps) http.Handler {
 	router.With(userAuth, userPrincipalAccess).Get("/api/user/identities", userHandler.ListIdentities)
 	router.With(userAuth, userPrincipalAccess).Get("/api/user/config", userHandler.GetConfig)
 	router.With(userAuth, userPrincipalAccess).Post("/api/user/config", userHandler.SetConfig)
+	router.With(userAuth, userPrincipalAccess).Get("/api/user/im/clawbot", deps.IM.Status)
+	router.With(userAuth, userPrincipalAccess).Post("/api/user/im/clawbot/login", deps.IM.StartLogin)
+	router.With(userAuth, userPrincipalAccess).Post("/api/user/im/clawbot/login/{session_id}/poll", deps.IM.PollLogin)
+	router.With(userAuth, userPrincipalAccess).Delete("/api/user/im/clawbot", deps.IM.Disconnect)
 	router.With(userAuth, userPrincipalAccess).Post("/api/user/password", userHandler.ChangePassword)
 	router.With(userAuth, userPrincipalAccess).Get("/api/automation/rules", userHandler.ListAutomationRules)
 	router.With(userAuth, userPrincipalAccess).Post("/api/automation/rules", userHandler.SaveAutomationRule)

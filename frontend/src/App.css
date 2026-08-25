@@ -1205,6 +1205,54 @@
   gap: 16px;
 }
 
+.clawbot-settings {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+}
+
+.clawbot-settings h4.ant-typography {
+  margin: 0 0 6px;
+}
+
+.clawbot-settings h4 .anticon {
+  margin-right: 7px;
+  color: #07c160;
+}
+
+.clawbot-settings-alert {
+  margin-top: 0;
+}
+
+.clawbot-connection-card,
+.clawbot-login-card {
+  border-color: var(--app-border);
+  background: var(--app-bg-panel-strong);
+}
+
+.clawbot-connection-card .ant-card-body {
+  display: grid;
+  gap: 14px;
+}
+
+.clawbot-connection-meta,
+.clawbot-command-help {
+  display: grid;
+  gap: 4px;
+}
+
+.clawbot-command-help code {
+  white-space: nowrap;
+}
+
+.clawbot-login-card .ant-card-body {
+  padding: 20px;
+}
+
+.clawbot-verify-code {
+  width: min(100%, 360px);
+}
+
 .system-settings-rows {
   display: grid;
   gap: 10px;

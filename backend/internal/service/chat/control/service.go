@@ -40,6 +40,7 @@ const (
 	SourceAutomation CommandSource = "automation"
 	SourceAdmin      CommandSource = "admin"
 	SourceLab        CommandSource = "lab"
+	SourceIM         CommandSource = "im"
 )
 
 type AppliedCommand struct {

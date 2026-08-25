@@ -190,7 +190,7 @@ func (s *Service) ControlApplied(ctx context.Context, applied controlsvc.Applied
 	if !ActionFromTurn(command.Action).Terminal() && !autoCompleted {
 		s.markManualTakeover(command.ConversationID, command.RequestID)
 	}
-	recordSource := command.Source == "" || command.Source == controlsvc.SourceAPI || command.Source == controlsvc.SourceWorkspace
+	recordSource := command.Source == "" || command.Source == controlsvc.SourceAPI || command.Source == controlsvc.SourceWorkspace || command.Source == controlsvc.SourceIM
 	requestID := strings.TrimSpace(command.RequestID)
 	now := time.Now().UTC()
 	s.mu.Lock()

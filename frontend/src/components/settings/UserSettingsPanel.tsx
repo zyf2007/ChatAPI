@@ -4,6 +4,7 @@ import { Button, Divider, Form, Input, InputNumber, Switch, Typography } from 'a
 import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
 import type { UserConfig } from '../../types/chat'
+import { ClawBotSettingsCard } from './ClawBotSettingsCard'
 import { TotpSetupPanel } from './TotpSetupPanel'
 
 type UserSettingsPanelProps = {
@@ -244,6 +245,10 @@ export function UserSettingsPanel({ open, onClose, totpEnabled, onTotpRefresh }:
           </div>
         </div>
       </div>
+
+      <Divider />
+
+      <ClawBotSettingsCard open={open} />
 
       <Divider />
 
