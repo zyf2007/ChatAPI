@@ -3,7 +3,7 @@ import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 
 import type { AutomationRule } from '../../types/chat'
 
-type AutomationRulesPanelProps = {
+export type AutomationRulesPanelProps = {
   automationRules: AutomationRule[]
   onCreateAutomationRule: () => void | Promise<void>
   onDeleteAutomationRule: (ruleId: string) => void | Promise<void>

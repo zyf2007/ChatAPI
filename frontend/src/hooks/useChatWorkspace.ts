@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
-import { decideComposerEnterAction } from './chatWorkspace/composerKeyboard'
+import {
+  decideComposerKeyboardAction,
+  getNextComposerMode,
+  shouldUseNativeComposerNewline,
+  type ComposerKeyboardAction,
+} from './chatWorkspace/composerKeyboard'
 
+import { useKeyboardShortcuts } from '../features/keyboard-shortcuts/useKeyboardShortcuts'
 import { requestFormJson, requestJson } from '../lib/api'
 import { appMessage } from '../lib/antdMessage'
 import {
@@ -35,6 +41,7 @@ function isResponseOpenStatus(status: string | undefined) {
 export function useChatWorkspace(isMobile: boolean) {
   const [booting, setBooting] = useState(true)
   const [auth, setAuth] = useState<AuthSession>(DEFAULT_AUTH_SESSION)
+  const keyboardShortcuts = useKeyboardShortcuts(auth.user?.id ?? '')
   const [loginLoading, setLoginLoading] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversationId, setSelectedConversationId] = useState('')
@@ -612,41 +619,70 @@ export function useChatWorkspace(isMobile: boolean) {
     }
   }
 
-  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLElement>): ComposerKeyboardAction['type'] {
     const isAnswerMode = composerMode === 'assistant_message'
     const isThinkingMode = composerMode === 'thinking'
-    const textarea = event.currentTarget
-    const decision = decideComposerEnterAction(event, {
+    const textarea = event.target instanceof HTMLTextAreaElement ? event.target : null
+    const isEditorTarget = Boolean(textarea && (isAnswerMode || isThinkingMode))
+    const editorText = isThinkingMode ? thinkingText : composer
+    const currentText = textarea?.value ?? editorText
+    const decision = decideComposerKeyboardAction(event, {
       sending,
       isWaitingForUser,
       isAnswerMode,
       isThinkingMode,
+      isEditorTarget,
+      isComposerSurfaceTarget: event.target === event.currentTarget,
       hasDraftBuffer: Boolean(draftBuffer),
-      hasComposerText: Boolean(normalizeChatText(textarea.value)),
-    })
+      hasComposerText: Boolean(normalizeChatText(currentText)),
+    }, keyboardShortcuts.bindings)
 
     switch (decision.type) {
       case 'ignore':
       case 'none':
-      case 'newline':
-        return
+        return decision.type
+      case 'newline': {
+        if (!textarea) return 'none'
+        // Enter already has the correct textarea editing semantics, including
+        // beforeinput/input events and the browser undo stack. Only non-Enter
+        // custom bindings (for example Tab) need manual insertion.
+        if (shouldUseNativeComposerNewline(event)) return decision.type
+        event.preventDefault()
+        const selectionStart = textarea.selectionStart ?? currentText.length
+        const selectionEnd = textarea.selectionEnd ?? selectionStart
+        const nextText = `${currentText.slice(0, selectionStart)}\n${currentText.slice(selectionEnd)}`
+        if (isThinkingMode) {
+          setThinkingText(nextText)
+        } else {
+          setComposer(nextText)
+        }
+        window.requestAnimationFrame(() => {
+          textarea.focus()
+          textarea.setSelectionRange(selectionStart + 1, selectionStart + 1)
+        })
+        return decision.type
+      }
       case 'restore_draft':
         event.preventDefault()
         // Only answer mode reuses the streamed draft buffer back into the editor.
         setComposer(`${draftBuffer}${composer}`)
-        return
+        return decision.type
       case 'complete':
         event.preventDefault()
         // Ending a turn is only available from answer mode (enforced in decision).
         void handleSend()
-        return
+        return decision.type
       case 'stream':
-        // Enter = stream current chunk (answer or thinking), same as clicking the stream button.
+        // The configured shortcut streams the current answer or thinking chunk.
         event.preventDefault()
-        void handleDraft(textarea.value).finally(() => {
-          window.requestAnimationFrame(() => textarea.focus())
+        void handleDraft(currentText).finally(() => {
+          window.requestAnimationFrame(() => textarea?.focus())
         })
-        return
+        return decision.type
+      case 'cycle_mode':
+        event.preventDefault()
+        selectComposerMode(getNextComposerMode(composerMode))
+        return decision.type
     }
   }
 
@@ -693,6 +729,7 @@ export function useChatWorkspace(isMobile: boolean) {
     handleTotpRefresh,
     isWaitingForUser,
     keyboardOffset,
+    keyboardShortcuts,
     loginLoading,
     messages,
     messagesLoading,

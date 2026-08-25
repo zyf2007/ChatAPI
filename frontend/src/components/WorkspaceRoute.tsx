@@ -191,6 +191,7 @@ export function WorkspaceRoute() {
             isMobile={isMobile}
             isWaitingForUser={workspace.isWaitingForUser}
             keyboardOffset={workspace.keyboardOffset}
+            keyboardShortcuts={workspace.keyboardShortcuts}
             messagesLoading={workspace.messagesLoading}
             onDraft={workspace.handleDraft}
             onAutomationRecording={workspace.handleAutomationRecording}

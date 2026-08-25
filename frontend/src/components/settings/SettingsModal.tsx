@@ -3,28 +3,23 @@ import { Button, Modal, Tabs, Typography } from 'antd'
 import { ControlOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 
-import type { AutomationRule, AuthUser } from '../../types/chat'
+import type { AuthUser } from '../../types/chat'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
-import { AutomationRulesPanel } from './AutomationRulesPanel'
+import { AutomationRulesPanel, type AutomationRulesPanelProps } from './AutomationRulesPanel'
 import { BrowserAssistSettingsPanel } from './BrowserAssistSettingsPanel'
+import { KeyboardShortcutsSettingsPanel } from './KeyboardShortcutsSettingsPanel'
 import { UserSettingsPanel } from './UserSettingsPanel'
 
-type SettingsModalProps = {
+type SettingsModalProps = AutomationRulesPanelProps & {
   automationRuleEditorOpen: boolean
-  automationRules: AutomationRule[]
-  onCreateAutomationRule: () => void | Promise<void>
-  onDeleteAutomationRule: (ruleId: string) => void | Promise<void>
-  onEditAutomationRule: (ruleId: string) => void | Promise<void>
-  onToggleAutomationRule: (ruleId: string, enabled: boolean) => void | Promise<void>
   open: boolean
   onClose: () => void
-  savingAutomationRules: boolean
   user: AuthUser | null
   totpEnabled: boolean
   onTotpRefresh: () => void
 }
 
-type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'browser-assist' | 'system'
+type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'browser-assist' | 'keyboard-shortcuts' | 'system'
 
 export function SettingsModal({
   automationRuleEditorOpen,
@@ -72,6 +67,16 @@ export function SettingsModal({
       key: 'browser-assist',
       label: '辅助模型',
       children: <BrowserAssistSettingsPanel open={open && activeTab === 'browser-assist'} userID={user?.id ?? ''} />,
+    },
+    {
+      key: 'keyboard-shortcuts',
+      label: '快捷键',
+      children: (
+        <KeyboardShortcutsSettingsPanel
+          key={user?.id ?? 'anonymous'}
+          userID={user?.id ?? ''}
+        />
+      ),
     },
   ]
 

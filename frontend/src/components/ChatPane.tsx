@@ -38,6 +38,8 @@ import { ToolField } from './ToolField'
 import { ChatMessageList } from './ChatMessageList'
 import { ToolCallAssistPopover } from '../features/tool-call-assist/ToolCallAssistPopover'
 import { normalizeChatText } from '../lib/chat-format'
+import { formatKeyboardShortcutBinding, type KeyboardShortcutConfig } from '../features/keyboard-shortcuts/shortcuts'
+import type { ComposerKeyboardAction } from '../hooks/chatWorkspace/composerKeyboard'
 import type {
   ComposerMode,
   BuiltinToolOption,
@@ -65,10 +67,11 @@ type ChatPaneProps = {
   composer: string
   composerMode: ComposerMode
   draftBuffer: string
-  handleComposerKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+  handleComposerKeyDown: (event: KeyboardEvent<HTMLElement>) => ComposerKeyboardAction['type']
   isMobile: boolean
   isWaitingForUser: boolean
   keyboardOffset: number
+  keyboardShortcuts: KeyboardShortcutConfig
   messagesLoading: boolean
   onDraft: () => void | Promise<void>
   onAutomationRecording: (action: 'start' | 'stop' | 'cancel') => void | Promise<void>
@@ -119,6 +122,7 @@ export function ChatPane(props: ChatPaneProps) {
     isMobile,
     isWaitingForUser,
     keyboardOffset,
+    keyboardShortcuts,
     messagesLoading,
     onDraft,
     onAutomationRecording,
@@ -264,6 +268,38 @@ export function ChatPane(props: ChatPaneProps) {
     { label: 'summery 模式', value: 'summery' },
     { label: 'reasoning 模式', value: 'reasoning' },
   ]
+  const shortcutCopy = (action: keyof KeyboardShortcutConfig['bindings'], label: string) => {
+    const binding = keyboardShortcuts.bindings[action]
+    return binding ? `${formatKeyboardShortcutBinding(binding)} ${label}` : ''
+  }
+  const modeCycleShortcut = shortcutCopy('cycle_mode', '切换类型')
+  const answerShortcutHint = [
+    shortcutCopy('stream', '流式输出'),
+    shortcutCopy('newline', '换行'),
+    shortcutCopy('complete', '结束输出'),
+    shortcutCopy('restore_draft', '继续编辑'),
+    modeCycleShortcut,
+  ].filter(Boolean).join('，')
+  const thinkingShortcutHint = [
+    shortcutCopy('stream', '流式输出'),
+    shortcutCopy('newline', '换行'),
+    modeCycleShortcut,
+  ].filter(Boolean).join('，')
+
+  function handleComposerAreaKeyDown(event: KeyboardEvent<HTMLElement>) {
+    const action = handleComposerKeyDown(event)
+    if (action !== 'cycle_mode') return
+    window.requestAnimationFrame(() => {
+      const editor = composerCardRef.current?.querySelector<HTMLTextAreaElement>(
+        'textarea[data-composer-editor="true"]:not(:disabled)',
+      )
+      if (editor) {
+        editor.focus()
+      } else {
+        composerCardRef.current?.focus()
+      }
+    })
+  }
 
   return (
     <div className="chat-pane" style={paneStyle}>
@@ -299,7 +335,15 @@ export function ChatPane(props: ChatPaneProps) {
         />
       </div>
 
-      <Card ref={composerCardRef} className="composer-card" style={composerStyle}>
+      <Card
+        ref={composerCardRef}
+        className="composer-card"
+        style={composerStyle}
+        role="group"
+        aria-label="回复编辑区快捷键区域"
+        tabIndex={-1}
+        onKeyDown={handleComposerAreaKeyDown}
+      >
         <div className="composer-shell">
           <Space direction="vertical" size={12} className="composer-stack">
             {draftBuffer && (
@@ -539,16 +583,16 @@ export function ChatPane(props: ChatPaneProps) {
                   <Typography.Text className="thinking-panel-hint">
                     当前会以{' '}
                     {reasoningStreamMode === 'reasoning' ? 'reasoning' : 'summery'}
-                    输出给调用方 · Enter 流式输出，Shift+Enter 换行
+                    输出给调用方{thinkingShortcutHint ? ` · ${thinkingShortcutHint}` : ''}
                   </Typography.Text>
                 </div>
                 <TextArea
                   value={thinkingText}
                   onChange={(event) => setThinkingText(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
+                  data-composer-editor="true"
                   placeholder={
                     isWaitingForUser
-                      ? '输入思考过程。按 Enter 会立刻流式输出给调用方（和正文一样），Shift+Enter 换行。'
+                      ? `输入思考过程。${thinkingShortcutHint || '可使用下方按钮输出。'}`
                       : '当前没有等待中的 user 请求。'
                   }
                   autoSize={{ minRows: 4, maxRows: 10 }}
@@ -562,10 +606,10 @@ export function ChatPane(props: ChatPaneProps) {
                 <TextArea
                   value={composer}
                   onChange={(event) => setComposer(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
+                  data-composer-editor="true"
                   placeholder={
                     isWaitingForUser
-                      ? '输入你作为 assistant 的回复。Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束输出。'
+                      ? `输入你作为 assistant 的回复。${answerShortcutHint || '可使用下方按钮输出。'}`
                       : '当前没有等待中的 user 请求。'
                   }
                   autoSize={{ minRows: 4, maxRows: 10 }}
@@ -581,16 +625,16 @@ export function ChatPane(props: ChatPaneProps) {
                 ? '正在发送并等待服务端同步草稿…'
                 : isWaitingForUser
                 ? composerMode === 'assistant_message'
-                  ? 'Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束。片段会保留在本轮回复里。'
+                  ? `${answerShortcutHint || '可使用右侧按钮输出'}。片段会保留在本轮回复里。`
                 : composerMode === 'thinking'
-                    ? `Enter 流式输出思考（${
+                    ? `${thinkingShortcutHint || '可使用左侧按钮输出思考'}（${
                         isResponsesConversation && reasoningStreamMode === 'reasoning'
                           ? 'reasoning'
                           : 'summery'
-                      }），Shift+Enter 换行。思考不会结束这一轮。`
+                      }）。思考不会结束这一轮。`
                     : composerMode === 'builtin_tool'
-                      ? '内置工具会输出 Responses 官方内置工具事件，不会结束这一轮。'
-                    : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
+                      ? `内置工具会输出 Responses 官方内置工具事件，不会结束这一轮${modeCycleShortcut ? ` · ${modeCycleShortcut}` : ''}。`
+                    : `Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item${modeCycleShortcut ? ` · ${modeCycleShortcut}` : ''}。`
                 : '没有新的 user 请求时不能输出回复。'}
             </Typography.Text>
             <Space>

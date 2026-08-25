@@ -2356,6 +2356,11 @@ body.image-preview-open {
   overflow: hidden;
 }
 
+.composer-card:focus-visible {
+  outline: 2px solid rgba(77, 168, 255, 0.78);
+  outline-offset: -2px;
+}
+
 .composer-shell {
   display: flex;
   flex-direction: column;
@@ -3184,4 +3189,103 @@ body[data-route='/'] .social-link-button:focus-visible::before {
 
 .browser-assist-form {
   max-width: 620px;
+}
+
+.keyboard-shortcuts-settings {
+  max-width: 780px;
+}
+
+.keyboard-shortcuts-heading h4 {
+  margin: 24px 0 4px;
+}
+
+.keyboard-shortcuts-heading .ant-typography {
+  margin-bottom: 16px;
+}
+
+.keyboard-shortcut-list {
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 10px;
+  background: var(--app-bg-panel-strong);
+}
+
+.keyboard-shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(120px, auto) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--app-border-soft);
+}
+
+.keyboard-shortcut-row:last-child {
+  border-bottom: 0;
+}
+
+.keyboard-shortcut-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.keyboard-shortcut-key {
+  min-width: 108px;
+  padding: 5px 9px;
+  border: 1px solid var(--app-border);
+  border-bottom-color: var(--app-border-strong);
+  border-radius: 6px;
+  background: var(--app-bg-muted);
+  color: var(--app-text);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.keyboard-shortcut-key.is-empty {
+  color: var(--app-text-muted);
+  font-weight: 500;
+}
+
+.keyboard-shortcut-actions {
+  justify-self: end;
+}
+
+.keyboard-shortcuts-error {
+  margin-top: 12px;
+}
+
+.keyboard-shortcuts-footer {
+  margin-top: 16px;
+}
+
+.keyboard-shortcut-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .keyboard-shortcut-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .keyboard-shortcut-key {
+    min-width: 96px;
+  }
+
+  .keyboard-shortcut-actions {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
 }
