@@ -207,10 +207,10 @@ curl https://127.0.0.1:5173/v1/responses \
 
 ```
 
-Anthropic Messages 兼容接口使用 `/messages`，例如：
+Anthropic Messages 兼容接口使用 `/v1/messages`，例如：
 
 ```bash
-curl https://127.0.0.1:5173/messages \
+curl https://127.0.0.1:5173/v1/messages \
   -H 'Content-Type: application/json' \
   -H 'Authorization: Bearer sk-i-love-you-hutao' \
   -d '{
