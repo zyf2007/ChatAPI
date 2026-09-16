@@ -54,6 +54,18 @@ docker compose down           # 停止服务，保留数据卷
 `CHATAPI_CORS_ORIGINS`。镜像构建默认通过 `goproxy.cn` 下载 Go 模块；无法访问时可在
 `.env` 中修改 `GOPROXY`。
 
+### GitHub Actions 构建镜像
+
+仓库中的 GitHub Actions 会在 Pull Request 中构建镜像进行验证，并在推送到
+`main` 或匹配 `v*.*.*` 的版本标签时，将镜像发布到 GitHub Container Registry：
+
+```bash
+docker pull ghcr.io/hoshizukimio/chatapi:latest
+```
+
+版本标签会同时生成对应的镜像标签和短提交 SHA 标签。首次从 GHCR 拉取私有镜像时，
+需要使用具有 `read:packages` 权限的 GitHub Token 登录。
+
 ### 单二进制构建
 
 在项目根目录执行：
