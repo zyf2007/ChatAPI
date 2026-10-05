@@ -146,6 +146,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      flex-wrap: nowrap;
+      gap: 16px;
       padding: 0 28px;
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
@@ -170,6 +172,12 @@
       font-family: "SF Mono", SFMono-Regular, Consolas, monospace;
       font-weight: 400;
       letter-spacing: -0.3px;
+      flex: 1 1 auto;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: left;
     }
 
     /* 右侧动态切换区域包装 */
@@ -178,19 +186,25 @@
       align-items: center;
       gap: 16px;
       height: 100%;
+      flex: 0 0 auto;
     }
 
-    /* 切换项目视窗：限定宽度、右对齐 */
+    /* 切换项目视窗：宽度贴合当前路径内容、整体右对齐，长路径统一末尾省略 */
     .url-path-window {
       position: relative;
       height: 24px;
-      width: 260px;
-      /* 预留足够宽度防止换行 */
+      width: max-content;
+      max-width: 260px;
+      flex: 0 0 auto;
       overflow: hidden;
     }
 
     /* 动态生成的路径通用样式 */
     .url-path {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
       color: #4da8ff;
       /* 对应原图的高级蓝色 */
       font-size: 1.1rem;
@@ -205,6 +219,16 @@
       transform: translateY(0);
       opacity: 1;
       filter: blur(0);
+    }
+
+    /* 不可见占位：让视窗宽度精确贴合当前路径 */
+    .url-path-sizer {
+      display: inline-block;
+      visibility: hidden;
+      white-space: nowrap;
+      font-size: 1.1rem;
+      font-family: "SF Mono", SFMono-Regular, Consolas, monospace;
+      font-weight: 500;
     }
 
     /* 高级感切换动效状态：进场与出场 */
@@ -353,12 +377,13 @@
       }
 
       .url-path,
+      .url-path-sizer,
       .url-base {
         font-size: 0.58rem;
       }
 
       .url-path-window {
-        width: 112px;
+        max-width: 112px;
         height: 18px;
       }
 
@@ -411,6 +436,7 @@
           <span class="url-base">https://api.kirari.fun</span>
           <div class="url-switch-zone">
             <div class="url-path-window" id="pathWindow">
+              <span class="url-path-sizer" aria-hidden="true"></span>
               <span class="url-path">/messages</span>
             </div>
             <button class="copy-btn" title="复制链接">
@@ -461,6 +487,12 @@
     let currentPathIndex = 0;
     const pathWindow = document.getElementById('pathWindow');
 
+    // 用当前路径撑开视窗，使宽度随实际内容自适应，避免固定宽度浪费空间
+    const pathSizer = pathWindow.querySelector('.url-path-sizer');
+    if (pathSizer) {
+      pathSizer.textContent = pathsArray[currentPathIndex];
+    }
+
     function switchApiPath() {
       // 获取当前显示的节点
       const currentPathEl = pathWindow.querySelector('.url-path');
@@ -474,6 +506,11 @@
       nextPathEl.className = 'url-path enter';
       nextPathEl.textContent = nextPathText;
       pathWindow.appendChild(nextPathEl);
+
+      // 同步占位宽度，让视窗贴合新路径
+      if (pathSizer) {
+        pathSizer.textContent = nextPathText;
+      }
 
       // 让当前节点触发退场状态 (exit)
       if (currentPathEl) {

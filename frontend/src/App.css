@@ -2620,6 +2620,12 @@ body.image-preview-open {
   line-height: 1.55;
 }
 
+.composer-textarea:read-only {
+  background: rgba(255, 255, 255, 0.62) !important;
+  color: var(--app-text-muted) !important;
+  cursor: not-allowed;
+}
+
 .composer-hint {
   color: var(--app-text-muted) !important;
   font-size: 12px !important;

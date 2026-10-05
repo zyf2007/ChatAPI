@@ -28,6 +28,36 @@ export type ComposerEnterAction =
   | { type: 'complete' }
   | { type: 'stream' }
 
+// The composer's two primary modes. Tab toggles between them while the
+// textarea is focused (composerKeyboard.test.ts freezes this two-state intent).
+export const COMPOSER_TAB_MODES = ['assistant_message', 'thinking'] as const
+
+export type ComposerTabMode = (typeof COMPOSER_TAB_MODES)[number]
+
+export type ComposerTabAction = { type: 'none' } | { type: 'toggle'; nextMode: ComposerTabMode }
+
+// decideComposerTabAction toggles the composer mode on Tab.
+// Shift+Tab and Ctrl/Cmd/Alt+Tab are left to the browser so Tab/Shift+Tab keep
+// their normal accessibility focus-navigation behavior.
+export function decideComposerTabAction(
+  event: ComposerKeyboardEventLike,
+  currentMode: string,
+): ComposerTabAction {
+  if ((event.key ?? '') !== 'Tab') {
+    return { type: 'none' }
+  }
+  if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+    return { type: 'none' }
+  }
+  if (currentMode !== COMPOSER_TAB_MODES[0] && currentMode !== COMPOSER_TAB_MODES[1]) {
+    return { type: 'none' }
+  }
+  return {
+    type: 'toggle',
+    nextMode: currentMode === COMPOSER_TAB_MODES[0] ? COMPOSER_TAB_MODES[1] : COMPOSER_TAB_MODES[0],
+  }
+}
+
 export function shouldIgnoreComposerEnter(event: ComposerKeyboardEventLike): boolean {
   return Boolean(event.isComposing || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)
 }

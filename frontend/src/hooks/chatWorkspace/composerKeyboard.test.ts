@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import {
   decideComposerEnterAction,
+  decideComposerTabAction,
   shouldIgnoreComposerEnter,
   type ComposerKeyboardContext,
   type ComposerKeyboardEventLike,
@@ -109,5 +110,39 @@ describe('decideComposerEnterAction', () => {
       decideComposerEnterAction(event({}), { ...baseContext, isWaitingForUser: false }),
       { type: 'none' },
     )
+  })
+})
+
+describe('decideComposerTabAction', () => {
+  it('toggles assistant_message → thinking on Tab', () => {
+    assert.deepEqual(decideComposerTabAction(event({ key: 'Tab' }), 'assistant_message'), {
+      type: 'toggle',
+      nextMode: 'thinking',
+    })
+  })
+
+  it('toggles back thinking → assistant_message on Tab', () => {
+    assert.deepEqual(decideComposerTabAction(event({ key: 'Tab' }), 'thinking'), {
+      type: 'toggle',
+      nextMode: 'assistant_message',
+    })
+  })
+
+  it('ignores non-Tab keys', () => {
+    assert.deepEqual(decideComposerTabAction(event({ key: 'Enter' }), 'assistant_message'), { type: 'none' })
+  })
+
+  it('leaves Shift/Ctrl/Cmd/Alt combos to the browser', () => {
+    for (const partial of [{ shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) {
+      assert.deepEqual(
+        decideComposerTabAction(event({ key: 'Tab', ...partial }), 'assistant_message'),
+        { type: 'none' },
+      )
+    }
+  })
+
+  it('does nothing for modes outside the two-state toggle', () => {
+    assert.deepEqual(decideComposerTabAction(event({ key: 'Tab' }), 'tool_call'), { type: 'none' })
+    assert.deepEqual(decideComposerTabAction(event({ key: 'Tab' }), 'builtin_tool'), { type: 'none' })
   })
 })

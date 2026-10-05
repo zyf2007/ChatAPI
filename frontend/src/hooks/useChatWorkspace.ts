@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 
-import { decideComposerEnterAction } from './chatWorkspace/composerKeyboard'
+import { decideComposerEnterAction, decideComposerTabAction } from './chatWorkspace/composerKeyboard'
 
 import { requestFormJson, requestJson } from '../lib/api'
 import { appMessage } from '../lib/antdMessage'
@@ -460,6 +460,14 @@ export function useChatWorkspace(isMobile: boolean) {
     if (!normalizeChatText(rawChunk)) return
     const chunk = normalizedOutputText(rawChunk)
     if (!beginSending()) return
+    // Clear this chunk before awaiting so the user can keep typing the next
+    // chunk during the in-flight request, and the completion never wipes text
+    // entered meanwhile.
+    if (isThinkingMode) {
+      clearThinkingInput()
+    } else {
+      setComposer('')
+    }
     try {
       const ack = await sendWorkspaceCommand({
         kind: 'stream_delta',
@@ -470,11 +478,6 @@ export function useChatWorkspace(isMobile: boolean) {
         reasoning_stream_mode:
           isThinkingMode && isResponsesConversation ? reasoningStreamMode : undefined,
       })
-      if (isThinkingMode) {
-        clearThinkingInput()
-      } else {
-        setComposer('')
-      }
       appMessage.success(
         ack.auto_completed
           ? '已达到输出限制并自动结束'
@@ -483,6 +486,12 @@ export function useChatWorkspace(isMobile: boolean) {
             : '已输出片段',
       )
     } catch (error) {
+      // Put the unsent chunk back so the user can retry after a failure.
+      if (isThinkingMode) {
+        setThinkingText((current) => `${rawChunk}${current}`)
+      } else {
+        setComposer((current) => `${rawChunk}${current}`)
+      }
       appMessage.error(error instanceof Error ? error.message : '输出片段失败')
     } finally {
       finishSending()
@@ -616,6 +625,18 @@ export function useChatWorkspace(isMobile: boolean) {
     const isAnswerMode = composerMode === 'assistant_message'
     const isThinkingMode = composerMode === 'thinking'
     const textarea = event.currentTarget
+
+    // Tab toggles between Assistant Message and 添加思考内容 without leaving the field.
+    const tabDecision = decideComposerTabAction(event, composerMode)
+    if (tabDecision.type === 'toggle') {
+      if (!sending && isWaitingForUser) {
+        event.preventDefault()
+        setComposerMode(tabDecision.nextMode)
+        window.requestAnimationFrame(() => textarea.focus())
+      }
+      return
+    }
+
     const decision = decideComposerEnterAction(event, {
       sending,
       isWaitingForUser,

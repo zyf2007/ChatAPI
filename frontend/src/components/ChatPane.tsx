@@ -238,6 +238,28 @@ export function ChatPane(props: ChatPaneProps) {
     }
   }, [])
 
+  const answerTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const thinkingTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const pendingComposerFocusRef = useRef(false)
+
+  // Switching composer mode unmounts one textarea and mounts the other, which
+  // drops focus. Restore focus to the freshly mounted field after a Tab toggle.
+  useEffect(() => {
+    if (!pendingComposerFocusRef.current) return
+    pendingComposerFocusRef.current = false
+    const target = composerMode === 'thinking' ? thinkingTextareaRef.current : answerTextareaRef.current
+    target?.focus()
+  }, [composerMode])
+
+  function handleComposerKeyDownWithFocus(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Tab toggles between the primary composer modes; mark that the new
+    // textarea should receive focus once React has mounted it.
+    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !sending && isWaitingForUser) {
+      pendingComposerFocusRef.current = true
+    }
+    handleComposerKeyDown(event)
+  }
+
   const paneStyle = {
     '--composer-height': `${composerHeight}px`,
     '--keyboard-offset': `${keyboardOffset}px`,
@@ -543,9 +565,10 @@ export function ChatPane(props: ChatPaneProps) {
                   </Typography.Text>
                 </div>
                 <TextArea
+                  ref={thinkingTextareaRef}
                   value={thinkingText}
                   onChange={(event) => setThinkingText(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
+                  onKeyDown={handleComposerKeyDownWithFocus}
                   placeholder={
                     isWaitingForUser
                       ? '输入思考过程。按 Enter 会立刻流式输出给调用方（和正文一样），Shift+Enter 换行。'
@@ -553,16 +576,17 @@ export function ChatPane(props: ChatPaneProps) {
                   }
                   autoSize={{ minRows: 4, maxRows: 10 }}
                   className="composer-textarea thinking-textarea"
-                  disabled={sending || !isWaitingForUser}
+                  readOnly={!isWaitingForUser}
                 />
               </div>
             )}
             {composerMode === 'assistant_message' && (
               <div className="answer-panel">
                 <TextArea
+                  ref={answerTextareaRef}
                   value={composer}
                   onChange={(event) => setComposer(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
+                  onKeyDown={handleComposerKeyDownWithFocus}
                   placeholder={
                     isWaitingForUser
                       ? '输入你作为 assistant 的回复。Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束输出。'
@@ -570,7 +594,7 @@ export function ChatPane(props: ChatPaneProps) {
                   }
                   autoSize={{ minRows: 4, maxRows: 10 }}
                   className="composer-textarea"
-                  disabled={sending || !isWaitingForUser}
+                  readOnly={!isWaitingForUser}
                 />
               </div>
             )}
@@ -581,13 +605,13 @@ export function ChatPane(props: ChatPaneProps) {
                 ? '正在发送并等待服务端同步草稿…'
                 : isWaitingForUser
                 ? composerMode === 'assistant_message'
-                  ? 'Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束。片段会保留在本轮回复里。'
+                  ? 'Enter 流式输出，Shift+Enter 换行，Ctrl/⌘+Enter 结束。Tab 切换到添加思考内容。片段会保留在本轮回复里。'
                 : composerMode === 'thinking'
                     ? `Enter 流式输出思考（${
                         isResponsesConversation && reasoningStreamMode === 'reasoning'
                           ? 'reasoning'
                           : 'summery'
-                      }），Shift+Enter 换行。思考不会结束这一轮。`
+                      }），Shift+Enter 换行。Tab 切回 Assistant Message。思考不会结束这一轮。`
                     : composerMode === 'builtin_tool'
                       ? '内置工具会输出 Responses 官方内置工具事件，不会结束这一轮。'
                     : 'Tool Call 模式会根据 schema 组装参数 JSON，点击左侧按钮会直接输出一个 function_call item。'
