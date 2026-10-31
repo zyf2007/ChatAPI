@@ -14,7 +14,7 @@ func (s *Service) AllowRequest(r *http.Request) bool {
 		return true
 	}
 	settings := s.currentSettings(r.Context())
-	return s.anonymousLimiter.Allow(accessRateLimitKey(r), settings.GlobalRateLimitRequests, settings.GlobalRateLimitWindow)
+	return s.anonymousLimiter.Allow(accessRateLimitKey(r, s.cfg.TrustedProxies), settings.GlobalRateLimitRequests, settings.GlobalRateLimitWindow)
 }
 
 func newRequestLimiter() *requestLimiter {

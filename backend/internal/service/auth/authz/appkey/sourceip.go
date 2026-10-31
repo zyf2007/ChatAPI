@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+
+	"github.com/zyf2007/ChatAPI/internal/platform/clientip"
 )
 
 func ExtractRequestAPIKey(r *http.Request) string {
@@ -22,62 +24,7 @@ func ExtractRequestAPIKey(r *http.Request) string {
 }
 
 func RequestSourceIP(r *http.Request, trustedProxies []string) string {
-	if r == nil {
-		return ""
-	}
-	remoteIP := hostFromRemoteAddr(r.RemoteAddr)
-	if !isTrustedProxy(remoteIP, trustedProxies) {
-		return remoteIP
-	}
-	if value := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); value != "" {
-		parts := strings.Split(value, ",")
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part != "" {
-				return part
-			}
-		}
-	}
-	if value := strings.TrimSpace(r.Header.Get("X-Real-IP")); value != "" {
-		return value
-	}
-	return remoteIP
-}
-
-func hostFromRemoteAddr(remoteAddr string) string {
-	host := strings.TrimSpace(remoteAddr)
-	if parsedHost, _, err := net.SplitHostPort(host); err == nil {
-		host = parsedHost
-	}
-	return host
-}
-
-func isTrustedProxy(remoteIP string, trustedProxies []string) bool {
-	if len(trustedProxies) == 0 {
-		return false
-	}
-	addr, err := netip.ParseAddr(strings.TrimSpace(remoteIP))
-	if err != nil {
-		return false
-	}
-	for _, rawRule := range trustedProxies {
-		rule := strings.TrimSpace(rawRule)
-		if rule == "" {
-			continue
-		}
-		if strings.Contains(rule, "/") {
-			prefix, err := netip.ParsePrefix(rule)
-			if err == nil && prefix.Contains(addr) {
-				return true
-			}
-			continue
-		}
-		allowedAddr, err := netip.ParseAddr(rule)
-		if err == nil && allowedAddr == addr {
-			return true
-		}
-	}
-	return false
+	return clientip.FromRequest(r, trustedProxies)
 }
 
 func (s *Service) AllowSourceIP(principal Principal, remoteAddr string) bool {

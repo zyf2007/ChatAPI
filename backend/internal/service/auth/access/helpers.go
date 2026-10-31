@@ -1,13 +1,13 @@
 package access
 
 import (
-	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
 
 	"github.com/zyf2007/ChatAPI/internal/config"
+	"github.com/zyf2007/ChatAPI/internal/platform/clientip"
 )
 
 func isLabPublicPath(r *http.Request) bool {
@@ -84,33 +84,16 @@ func normalizedOrigin(raw string) string {
 	return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
 }
 
-func accessRateLimitKey(r *http.Request) string {
+func accessRateLimitKey(r *http.Request, trustedProxies []string) string {
 	if r == nil {
 		return ""
 	}
-	host := strings.TrimSpace(r.Host)
-	remote := normalizeRemoteAddr(strings.TrimSpace(r.RemoteAddr))
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwarded != "" {
-		remote = forwarded
-	}
-	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
-		remote = realIP
-	}
+	remote := clientip.FromRequest(r, trustedProxies)
 	if remote == "" {
-		remote = "unknown"
+		return "unknown"
 	}
-	return host + "|" + remote
-}
-
-func normalizeRemoteAddr(raw string) string {
-	if raw == "" {
-		return ""
-	}
-	host, _, err := net.SplitHostPort(raw)
-	if err == nil {
-		return strings.TrimSpace(host)
-	}
-	return strings.TrimSpace(raw)
+	// The global client limit must not depend on the client-controlled Host header.
+	return remote
 }
 
 func WantsHTML(r *http.Request) bool {
