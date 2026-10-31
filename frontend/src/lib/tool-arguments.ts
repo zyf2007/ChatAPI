@@ -30,6 +30,7 @@ export function toolArgumentsToFormValues(
     Object.entries(value).flatMap(([name, fieldValue]) => {
       const fieldSchema = properties[name]
       if (!fieldSchema) return []
+      if (fieldSchema.enum?.length) return [[name, fieldValue as ToolFieldValue]]
       const type = getSchemaType(fieldSchema)
       if (type === 'object' || type === 'array') {
         return [[name, JSON.stringify(fieldValue, null, 2)]]
