@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test --config ../tests/playwright/playwright.config.ts",
     "test:e2e:types": "tsc --project ../tests/playwright/tsconfig.json",
-    "test": "node --experimental-strip-types --test src/hooks/chatWorkspace/composerKeyboard.test.ts src/lib/tool-schemas.test.ts src/lib/*.test.ts",
+    "test": "node --experimental-strip-types --test src/hooks/chatWorkspace/composerKeyboard.test.ts src/lib/*.test.ts",
     "test:unit": "npm test"
   },
   "dependencies": {

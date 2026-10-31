@@ -106,8 +106,13 @@ function normalizeBuiltinTool(item: unknown): BuiltinToolOption | null {
 export function buildInitialToolFormValues(schema?: JsonSchema) {
   const values: Record<string, ToolFieldValue> = {}
   const properties = schema?.properties ?? {}
+  const required = new Set(schema?.required ?? [])
   for (const [key, propertySchema] of Object.entries(properties)) {
     const type = getSchemaType(propertySchema)
+    if (propertySchema.default === undefined && type === 'boolean' && required.has(key) && !propertySchema.enum?.length) {
+      values[key] = false
+      continue
+    }
     if (propertySchema.default == null) continue
     if (
       type === 'string' ||
