@@ -13,9 +13,8 @@ test.describe('homepage API endpoint presentation', () => {
     await expect(frame.locator('.url-path:not(.exit)')).toHaveText('/v1/chat/completions', { timeout: 8_000 })
   })
 
-  test('copy button copies the currently displayed endpoint', async ({ page, context }) => {
+  test('copy button copies the currently displayed endpoint', async ({ page }) => {
     await page.goto('/')
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(page.url()).origin })
     const frame = page.frameLocator('iframe[title="ChatAPI Homepage"]')
     await frame.locator('body').evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {
