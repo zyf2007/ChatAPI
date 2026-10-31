@@ -47,6 +47,7 @@ function sortConversations(items: Conversation[]) {
 
 type UseWorkspaceRealtimeParams = {
   authenticated: boolean
+  automationEnabled: boolean
   conversations: Conversation[]
   onConnectionCountChange: (value: number) => void
   onConversationCountChange: (value: number) => void
@@ -59,6 +60,7 @@ type UseWorkspaceRealtimeParams = {
 
 export function useWorkspaceRealtime({
   authenticated,
+  automationEnabled,
   conversations,
   onConnectionCountChange,
   onConversationCountChange,
@@ -251,7 +253,9 @@ export function useWorkspaceRealtime({
 
       socket.addEventListener('open', () => {
         sendJSON({ type: 'workspace.ping' })
-        void sendAutomationRecordCommand('get', selectedConversationIdRef.current).catch(() => undefined)
+        if (automationEnabled) {
+          void sendAutomationRecordCommand('get', selectedConversationIdRef.current).catch(() => undefined)
+        }
       })
 
       socket.addEventListener('message', (event) => {
@@ -559,6 +563,7 @@ export function useWorkspaceRealtime({
   }, [
     applySelectedConversation,
     authenticated,
+    automationEnabled,
     onConnectionCountChange,
     onConversationCountChange,
     rejectPendingCommands,

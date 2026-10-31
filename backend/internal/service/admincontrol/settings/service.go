@@ -41,7 +41,7 @@ type PatchResult struct {
 func New(runtime config.Config, domains ...Domain) *Service {
 	items := map[string]Domain{}
 	for _, d := range domains {
-		if d.Settings != nil {
+		if d.Settings != nil && (runtime.Mode != config.ModeLab || d.Settings.Domain() == "access" || d.Settings.Domain() == "media") {
 			items[d.Settings.Domain()] = d
 		}
 	}

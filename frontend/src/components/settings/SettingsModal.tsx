@@ -4,12 +4,15 @@ import { ControlOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 
 import type { AutomationRule, AuthUser } from '../../types/chat'
+import { DomainSettingsSection } from '../../features/admin-settings/sections/DomainSettingsSection'
+import { VirtualModelsPanel } from './VirtualModelsPanel'
 import { ApiKeyManagementPanel } from './ApiKeyManagementPanel'
 import { AutomationRulesPanel } from './AutomationRulesPanel'
 import { BrowserAssistSettingsPanel } from './BrowserAssistSettingsPanel'
 import { UserSettingsPanel } from './UserSettingsPanel'
 
 type SettingsModalProps = {
+  isLab: boolean
   automationRuleEditorOpen: boolean
   automationRules: AutomationRule[]
   onCreateAutomationRule: () => void | Promise<void>
@@ -24,9 +27,10 @@ type SettingsModalProps = {
   onTotpRefresh: () => void
 }
 
-type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'browser-assist' | 'system'
+type TabKey = 'user-settings' | 'api-keys' | 'automation' | 'browser-assist' | 'system' | 'virtual-models' | 'media'
 
 export function SettingsModal({
+  isLab,
   automationRuleEditorOpen,
   automationRules,
   onCreateAutomationRule,
@@ -41,8 +45,8 @@ export function SettingsModal({
   onTotpRefresh,
 }: SettingsModalProps) {
 	const navigate = useNavigate()
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin'
-  const [activeTab, setActiveTab] = useState<TabKey>('user-settings')
+  const isAdmin = !isLab && (user?.role === 'admin' || user?.role === 'superadmin')
+  const [activeTab, setActiveTab] = useState<TabKey>(isLab ? 'virtual-models' : 'user-settings')
 
   const handleTabChange = (key: string) => {
     setActiveTab(key as TabKey)
@@ -77,10 +81,11 @@ export function SettingsModal({
 
   const userSettingsTab = {
     key: 'user-settings',
-    label: isAdmin ? <span style={{ color: '#13c2c2' }}>我的设置</span> : '我的设置',
+    label: isLab ? '工作区设置' : isAdmin ? <span style={{ color: '#13c2c2' }}>我的设置</span> : '我的设置',
     children: (
       <UserSettingsPanel
         open={open && activeTab === 'user-settings'}
+        isLab={isLab}
         onClose={onClose}
         totpEnabled={totpEnabled}
         onTotpRefresh={onTotpRefresh}
@@ -92,11 +97,19 @@ export function SettingsModal({
 	{
 	  key: 'system',
 	  label: <span style={{ color: '#13c2c2' }}>系统设置</span>,
-	  children: <div className="admin-settings-entry"><ControlOutlined/><Typography.Title level={4}>系统管理设置</Typography.Title><Typography.Paragraph type="secondary">管理认证、访问限制、聊天、媒体、自动化和实时通信策略。</Typography.Paragraph><Button type="primary" onClick={()=>{onClose();navigate('/admin/settings/overview')}}>打开管理控制面</Button></div>,
+	  children: <div className="admin-settings-entry"><ControlOutlined/><Typography.Title level={4}>系统管理设置</Typography.Title><Typography.Paragraph type="secondary">{isLab ? '管理 Lab 的访问限制、聊天、媒体和实时通信策略，查看实例运行状态。' : '管理认证、访问限制、聊天、媒体、自动化和实时通信策略。'}</Typography.Paragraph><Button type="primary" onClick={()=>{onClose();navigate('/admin/settings/overview')}}>打开管理控制面</Button></div>,
 	},
   ]
 
-  const tabs = isAdmin ? [...commonTabs, userSettingsTab, ...adminTabs] : [...commonTabs, userSettingsTab]
+  const tabs = isLab
+    ? [
+        { key: 'virtual-models', label: '模型列表', children: <VirtualModelsPanel open={open && activeTab === 'virtual-models'} /> },
+        ...commonTabs.filter((tab) => tab.key === 'browser-assist'),
+        userSettingsTab,
+        { key: 'media', label: '媒体设置', children: open && activeTab === 'media' ? <DomainSettingsSection domain="media" isLab /> : null },
+        { ...adminTabs[0], label: '实例设置' },
+      ]
+    : isAdmin ? [...commonTabs, userSettingsTab, ...adminTabs] : [...commonTabs, userSettingsTab]
 
   return (
     <Modal

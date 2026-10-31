@@ -113,7 +113,16 @@ function RegisterRoute() {
 }
 
 function StatisticsRoute() {
+  const auth = useAuthSession()
+  if (auth.loading) return <RouteLoading />
+  if (auth.session.mode === 'lab') return <Navigate to="/app" replace />
   return <StatisticsPage />
+}
+
+function HomepageRoute() {
+  const auth = useAuthSession()
+  if (auth.loading) return <RouteLoading />
+  return <HomepageScreen isLab={auth.session.mode === 'lab'} />
 }
 
 function ForgotPasswordRoute() {
@@ -157,7 +166,7 @@ function App() {
         </div>
       ) : null}
       <Routes>
-        <Route path="/" element={<HomepageScreen />} />
+        <Route path="/" element={<HomepageRoute />} />
         <Route path="/login" element={<LoginRoute />} />
         <Route path="/register" element={<RegisterRoute />} />
         <Route path="/forgot-password" element={<ForgotPasswordRoute />} />
@@ -165,7 +174,7 @@ function App() {
         <Route path="/statistics" element={<StatisticsRoute />} />
         <Route path="/app/*" element={<WorkspaceRoute />} />
 		<Route path="/admin/settings/*" element={<AdminSettingsPage />} />
-        <Route path="*" element={<HomepageScreen />} />
+        <Route path="*" element={<HomepageRoute />} />
       </Routes>
     </>
   )

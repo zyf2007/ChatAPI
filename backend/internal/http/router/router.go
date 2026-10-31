@@ -64,7 +64,9 @@ func New(deps Deps) http.Handler {
 	router.Use(httpmiddleware.RequireLabAccess(deps.Access, authLogger))
 	router.Use(httpmiddleware.RequireAccessRateLimit(deps.Access))
 	router.Use(httpmiddleware.LoadLabActor(deps.Access, authLogger))
-	router.Use(httpmiddleware.LoadUserSession(sessionrestore.NewService(deps.UserSessions), authLogger))
+	if deps.Config.Mode != config.ModeLab {
+		router.Use(httpmiddleware.LoadUserSession(sessionrestore.NewService(deps.UserSessions), authLogger))
+	}
 	router.Use(httpmiddleware.RequireSessionCSRF(deps.Access, deps.Policy, authLogger))
 
 	chatHandler := deps.Chat
@@ -100,8 +102,6 @@ func New(deps Deps) http.Handler {
 	router.Get("/api/health", healthHandler.ServeHTTP)
 	router.Get("/api/ready", readinessHandler.ServeHTTP)
 	router.Get("/api/ws", workspaceHandler.ServeWS)
-	router.With(userAuth, userPrincipalAccess).Get("/api/media/assets/{fileID}", uploadHandler.GetImage)
-	router.With(userAuth, userPrincipalAccess).Post("/api/conversations/{conversationID}/output-images", uploadHandler.UploadOutputImage)
 	router.Get("/api/setup/status", setupHandler.Status)
 	router.Get("/setup", setupHandler.HTML)
 	router.Post("/setup", setupHandler.Create)
@@ -111,11 +111,16 @@ func New(deps Deps) http.Handler {
 
 	registerProtocolRoutes(router, deps.Config, modelAuth, modelPrincipalAccess, chatHandler)
 	if deps.Config.Mode == config.ModeLab {
+		router.Get("/api/auth/session", userHandler.Session)
 		registerLabRoutes(router, labHandler)
+		registerLabUserRoutes(router, userHandler, uploadHandler)
+		registerLabSettingsRoutes(router, adminHandler)
 		mountSPA(router, deps.Config)
 		return router
 	}
 
+	router.With(userAuth, userPrincipalAccess).Get("/api/media/assets/{fileID}", uploadHandler.GetImage)
+	router.With(userAuth, userPrincipalAccess).Post("/api/conversations/{conversationID}/output-images", uploadHandler.UploadOutputImage)
 	router.Post("/api/auth/register", authHandler.Register)
 	router.Get("/api/auth/register/config", authHandler.RegisterConfig)
 	router.Post("/api/auth/register/send-code", authHandler.RegisterSendCode)

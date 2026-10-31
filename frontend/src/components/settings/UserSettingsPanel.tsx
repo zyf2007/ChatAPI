@@ -7,6 +7,7 @@ import type { UserConfig } from '../../types/chat'
 import { TotpSetupPanel } from './TotpSetupPanel'
 
 type UserSettingsPanelProps = {
+  isLab?: boolean
   open: boolean
   onClose: () => void
   totpEnabled: boolean
@@ -20,7 +21,7 @@ const DEFAULT_CONFIG: UserConfig = {
   messages_per_minute_limit: 0,
 }
 
-export function UserSettingsPanel({ open, onClose, totpEnabled, onTotpRefresh }: UserSettingsPanelProps) {
+export function UserSettingsPanel({ isLab = false, open, onClose, totpEnabled, onTotpRefresh }: UserSettingsPanelProps) {
   const [config, setConfig] = useState<UserConfig>(DEFAULT_CONFIG)
   const [savedConfig, setSavedConfig] = useState<UserConfig>(DEFAULT_CONFIG)
   const [, setLoading] = useState(false)
@@ -145,6 +146,7 @@ export function UserSettingsPanel({ open, onClose, totpEnabled, onTotpRefresh }:
           />
         </div>
 
+        {!isLab && (
         <div className="system-settings-row">
           <Typography.Text className="system-settings-row-title">消息限流</Typography.Text>
           <div className="system-settings-row-body">
@@ -182,6 +184,7 @@ export function UserSettingsPanel({ open, onClose, totpEnabled, onTotpRefresh }:
             onChange={(enabled) => updateSection('messages_per_minute_limit_enabled', enabled)}
           />
         </div>
+        )}
       </div>
 
       <div className="system-settings-footer">
@@ -196,6 +199,7 @@ export function UserSettingsPanel({ open, onClose, totpEnabled, onTotpRefresh }:
         </div>
       </div>
 
+      {!isLab && <>
       <Divider />
 
       <div className="system-settings-rows">
@@ -248,6 +252,7 @@ export function UserSettingsPanel({ open, onClose, totpEnabled, onTotpRefresh }:
       <Divider />
 
       <TotpSetupPanel totpEnabled={totpEnabled} onRefresh={onTotpRefresh} />
+      </>}
     </div>
   )
 }

@@ -31,6 +31,7 @@ import type {
 } from '../types/chat'
 
 type ConversationSidebarProps = {
+  isLab: boolean
   abortPopoverConversationId: string
   abortReason: string
   abortingConversationId: string
@@ -86,6 +87,7 @@ function conversationPreview(item: Conversation): string {
 }
 
 export function ConversationSidebar({
+  isLab,
   abortPopoverConversationId,
   abortReason,
   abortingConversationId,
@@ -165,6 +167,7 @@ export function ConversationSidebar({
                   danger
                   size="small"
                   icon={<DeleteOutlined />}
+                  aria-label="批量删除旧会话"
                   className="sidebar-action-button"
                 onClick={() => setPruneModalOpen(true)}
               />
@@ -213,6 +216,7 @@ export function ConversationSidebar({
 
           return (
             <List.Item
+              data-conversation-id={item.id}
               className={`conversation-item ${active ? 'active' : ''}`}
               onClick={() => void onSelectConversation(item.id)}
             >
@@ -323,32 +327,36 @@ export function ConversationSidebar({
           <>
             <div className="footer-head">
               <Typography.Text className="footer-name">{auth.user?.username}</Typography.Text>
-              <Tooltip title="自动化规则">
+              <Tooltip title="设置">
                 <Button
                   type="text"
                   icon={<SettingOutlined />}
+                  aria-label="设置"
                   className="footer-settings-button"
                   onClick={() => setAutomationRulesModalOpen(true)}
                 />
               </Tooltip>
             </div>
-            <Button icon={<LogoutOutlined />} onClick={() => void onLogout()} block>
-              退出登录
-            </Button>
+            {isLab ? <Typography.Text type="secondary">Lab 工作区</Typography.Text> : (
+              <Button icon={<LogoutOutlined />} onClick={() => void onLogout()} block>
+                退出登录
+              </Button>
+            )}
           </>
         ) : (
           <div className="sidebar-footer-collapsed">
-            <Tooltip title="自动化规则">
+            <Tooltip title="设置">
               <Button
                 type="text"
                 icon={<SettingOutlined />}
+                aria-label="设置"
                 className="footer-settings-button"
                 onClick={() => setAutomationRulesModalOpen(true)}
               />
             </Tooltip>
-            <Tooltip title="退出登录">
+            {!isLab ? <Tooltip title="退出登录">
               <Button type="text" icon={<LogoutOutlined />} onClick={() => void onLogout()} />
-            </Tooltip>
+            </Tooltip> : null}
           </div>
         )}
       </div>
@@ -383,6 +391,7 @@ export function ConversationSidebar({
         </Space>
       </Modal>
       <SettingsModal
+        isLab={isLab}
         automationRuleEditorOpen={automationRuleEditorOpen}
         automationRules={automationRules}
         onCreateAutomationRule={onCreateAutomationRule}
@@ -396,7 +405,7 @@ export function ConversationSidebar({
         totpEnabled={totpEnabled}
         onTotpRefresh={onTotpRefresh}
       />
-      <AutomationRuleEditorModal
+      {!isLab ? <AutomationRuleEditorModal
         editingAutomationRule={editingAutomationRule}
         open={automationRuleEditorOpen}
         saving={savingAutomationRules}
@@ -406,7 +415,7 @@ export function ConversationSidebar({
           setEditingAutomationRule(null)
         }}
         onSave={onSaveAutomationRule}
-      />
+      /> : null}
     </div>
   )
 }

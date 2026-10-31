@@ -68,6 +68,12 @@ func TestProtocolListModels(t *testing.T) {
 	}))
 	defer server.Close()
 
+	getJSONWithHeaders(t, server.URL+"/v1/models", nil, http.StatusUnauthorized)
+	for _, path := range []string{"/api/user/virtual-models", "/api/user/config", "/api/admin/settings/media", "/api/admin/settings/access"} {
+		if status, body := getTextWithHeaders(t, server.URL+path, nil); status != http.StatusUnauthorized {
+			t.Fatalf("Serve auth lost for %s: %d %s", path, status, body)
+		}
+	}
 	resp := getJSONWithHeaders(t, server.URL+"/v1/models", map[string]string{
 		"Authorization": "Bearer " + rawKey,
 	}, http.StatusOK)

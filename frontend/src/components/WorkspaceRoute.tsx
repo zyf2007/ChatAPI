@@ -100,6 +100,7 @@ export function WorkspaceRoute() {
 
   const sidebar = (
     <ConversationSidebar
+      isLab={workspace.auth.mode === 'lab'}
       abortPopoverConversationId={workspace.abortPopoverConversationId}
       abortReason={workspace.abortReason}
       abortingConversationId={workspace.abortingConversationId}
@@ -175,6 +176,7 @@ export function WorkspaceRoute() {
         </Header>
         <Content className="content-shell">
           <ChatPane
+            isLab={workspace.auth.mode === 'lab'}
             automationExecution={workspace.automationExecution}
             automationRecording={workspace.automationRecording}
             availableBuiltinTools={workspace.availableBuiltinTools}

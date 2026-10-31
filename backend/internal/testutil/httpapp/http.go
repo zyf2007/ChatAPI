@@ -246,7 +246,7 @@ func assemble(input Input) (HTTPResult, error) {
 	if input.UserControl != nil && input.UserControl.Conversations != nil {
 		retentionPruner = input.UserControl.Conversations
 	}
-	conversationRetention := conversationretention.New(input.Accounts, retentionPruner, conversationLimit, logger(logging.LayerHTTP))
+	conversationRetention := conversationretention.New(input.Config.Mode, input.Accounts, retentionPruner, conversationLimit, logger(logging.LayerHTTP))
 	if input.Turn != nil {
 		input.Turn.ConversationCreated = conversationRetention.Enforce
 		input.Turn.ConversationTerminal = conversationRetention.Enforce

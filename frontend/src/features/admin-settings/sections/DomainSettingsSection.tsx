@@ -8,7 +8,7 @@ import { SettingFieldControl } from '../components/SettingFieldControl'
 import { RateLimitFieldRow } from '../components/RateLimitFieldRow'
 import type { SettingField, SettingsDocument } from '../model/types'
 
-export function DomainSettingsSection({ domain }: { domain: string }) {
+export function DomainSettingsSection({ domain, isLab = false }: { domain: string; isLab?: boolean }) {
   const [document, setDocument] = useState<SettingsDocument | null>(null)
   const [changes, setChanges] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
@@ -90,6 +90,7 @@ export function DomainSettingsSection({ domain }: { domain: string }) {
   }
   if (!document) return null
 
+  const visibleFields = document.fields.filter((field) => !isLab || !/^(user|session|app_key|model_key)_rate_limit_/.test(field.key))
   const render = (fields: SettingField[]) => (
     <div className="admin-settings-fields">
       {fields.map((field) => (
@@ -105,9 +106,9 @@ export function DomainSettingsSection({ domain }: { domain: string }) {
     </div>
   )
   const renderAccessRateLimits = () => {
-    const fieldsByKey = new Map(document.fields.map((field) => [field.key, field]))
-    const requestFields = document.fields.filter((field) => field.key.endsWith('_rate_limit_requests'))
-    const otherFields = document.fields.filter((field) => !field.key.includes('_rate_limit_'))
+    const fieldsByKey = new Map(visibleFields.map((field) => [field.key, field]))
+    const requestFields = visibleFields.filter((field) => field.key.endsWith('_rate_limit_requests'))
+    const otherFields = visibleFields.filter((field) => !field.key.includes('_rate_limit_'))
     return (
       <>
       <div className="admin-settings-fields">
@@ -135,9 +136,9 @@ export function DomainSettingsSection({ domain }: { domain: string }) {
       </>
     )
   }
-  const common = document.fields.filter((field) => field.level === 'common')
-  const policy = document.fields.filter((field) => field.level === 'policy')
-  const advanced = document.fields.filter((field) => field.level === 'advanced')
+  const common = visibleFields.filter((field) => field.level === 'common')
+  const policy = visibleFields.filter((field) => field.level === 'policy')
+  const advanced = visibleFields.filter((field) => field.level === 'advanced')
 
   return (
     <section className="admin-domain-section">

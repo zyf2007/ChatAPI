@@ -31,6 +31,10 @@ type UserHandler struct {
 }
 
 func (h UserHandler) Session(w http.ResponseWriter, r *http.Request) {
+	if h.Config.Mode == config.ModeLab {
+		httpx.WriteJSON(w, http.StatusOK, h.UserControl.Profile.BuildLabSessionView(r.Context(), h.Config))
+		return
+	}
 	pr, ok := session.PrincipalFromContext(r.Context())
 	if !ok {
 		view, err := h.UserControl.Profile.BuildAnonymousSessionView(r.Context(), h.Config)
@@ -137,13 +141,13 @@ func (h UserHandler) AbortConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
-	result, err := h.UserControl.Conversations.DeleteConversation(r.Context(), pr.UserID, conversationID)
+	result, err := h.UserControl.Conversations.DeleteConversation(r.Context(), ownerID, conversationID)
 	if err != nil {
 		status := statusForStoreError(err)
 		if errors.Is(err, usercontrolconversations.ErrWaitingConversationDelete) {
@@ -156,9 +160,9 @@ func (h UserHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h UserHandler) PruneConversations(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	var body struct {
@@ -168,7 +172,7 @@ func (h UserHandler) PruneConversations(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	result, skipped, err := h.UserControl.Conversations.PruneConversations(r.Context(), pr.UserID, body.KeepCount)
+	result, skipped, err := h.UserControl.Conversations.PruneConversations(r.Context(), ownerID, body.KeepCount)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -195,12 +199,12 @@ func (h UserHandler) ListAppKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	item, err := h.UserControl.Config.GetUserConfig(r.Context(), pr.UserID)
+	item, err := h.UserControl.Config.GetUserConfig(r.Context(), ownerID)
 	if err != nil {
 		if errors.Is(err, common.ErrNotFound) {
 			httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -215,9 +219,9 @@ func (h UserHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	var body map[string]any
@@ -225,7 +229,7 @@ func (h UserHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, err := h.UserControl.Config.UpdateUserConfig(r.Context(), pr.UserID, body)
+	item, err := h.UserControl.Config.UpdateUserConfig(r.Context(), ownerID, body)
 	if err != nil {
 		if errors.Is(err, usercontrolconfig.ErrInvalidNtfyConfig) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -338,12 +342,12 @@ func (h UserHandler) CreateModelKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserHandler) ListVirtualModels(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	items, err := h.UserControl.Keys.ListVirtualModels(r.Context(), pr.UserID)
+	items, err := h.UserControl.Keys.ListVirtualModels(r.Context(), ownerID)
 	if err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
@@ -352,9 +356,9 @@ func (h UserHandler) ListVirtualModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h UserHandler) CreateVirtualModel(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 	var body struct {
@@ -364,7 +368,7 @@ func (h UserHandler) CreateVirtualModel(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	item, err := h.UserControl.Keys.CreateVirtualModel(r.Context(), pr.UserID, body.Name)
+	item, err := h.UserControl.Keys.CreateVirtualModel(r.Context(), ownerID, body.Name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -373,12 +377,12 @@ func (h UserHandler) CreateVirtualModel(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h UserHandler) DeleteVirtualModel(w http.ResponseWriter, r *http.Request) {
-	pr, ok := session.PrincipalFromContext(r.Context())
+	ownerID, ok := sessionOrLabOwnerID(r)
 	if !ok {
-		http.Error(w, "session unauthorized", http.StatusUnauthorized)
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if err := h.UserControl.Keys.DeleteVirtualModel(r.Context(), pr.UserID, chi.URLParam(r, "modelID")); err != nil {
+	if err := h.UserControl.Keys.DeleteVirtualModel(r.Context(), ownerID, chi.URLParam(r, "modelID")); err != nil {
 		http.Error(w, err.Error(), statusForStoreError(err))
 		return
 	}

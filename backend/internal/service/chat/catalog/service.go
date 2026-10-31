@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
-	modelkey "github.com/zyf2007/ChatAPI/internal/service/auth/authz/modelkey"
 )
 
 type ModelKeyStore interface {
@@ -27,16 +26,16 @@ func New(modelKeys ModelKeyStore) *Service {
 	return &Service{modelKeys: modelKeys}
 }
 
-func (s *Service) ListModelsForPrincipal(ctx context.Context) ([]ModelDescriptor, error) {
+func (s *Service) ListModelsForOwner(ctx context.Context, ownerID string) ([]ModelDescriptor, error) {
 	if s == nil || s.modelKeys == nil {
 		return nil, nil
 	}
-	principal, ok := modelkey.PrincipalFromContext(ctx)
-	if !ok || strings.TrimSpace(principal.UserID) == "" {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
 		return nil, nil
 	}
 
-	items, err := s.modelKeys.ListModelsByUser(ctx, principal.UserID)
+	items, err := s.modelKeys.ListModelsByUser(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}

@@ -121,6 +121,7 @@ export function useChatWorkspace(isMobile: boolean) {
     sendWorkspaceCommand,
   } = useWorkspaceRealtime({
     authenticated: auth.authenticated,
+    automationEnabled: auth.mode !== 'lab',
     conversations,
     onConnectionCountChange: handleConnectionCountChange,
     onConversationCountChange: handleConversationCountChange,
@@ -211,7 +212,7 @@ export function useChatWorkspace(isMobile: boolean) {
         if (!active) return
         setAuth(session)
         setTotpEnabled(session.totp_enabled)
-        if (session.authenticated) {
+        if (session.authenticated && session.mode !== 'lab') {
           await loadAutomationRules()
         }
       } catch (error) {

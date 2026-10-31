@@ -238,7 +238,7 @@ func buildAdminModule(input applicationInput, auth authModule, chat chatModule) 
 		Logger: logger(logging.LayerUserControl), Events: chat.events, Automation: chat.automation,
 		RealtimeSettings: chat.realtimeSettings, ConversationLimit: conversationLimit,
 	})
-	retention := conversationretention.New(auth.accounts, user.Conversations, conversationLimit, logger(logging.LayerHTTP))
+	retention := conversationretention.New(input.config.Mode, auth.accounts, user.Conversations, conversationLimit, logger(logging.LayerHTTP))
 	chat.turn.ConversationCreated = retention.Enforce
 	chat.turn.ConversationTerminal = retention.Enforce
 	accessDomain, err := adminsettings.Combine("access", "访问限流", auth.accessSettings.AdminDomain(), chat.realtimeSettings, chat.settings)

@@ -33,6 +33,7 @@ const items = [
   ...domains,
 ]
 
+const labSectionKeys = new Set(['overview', 'system', 'access', 'media'])
 const sectionKeys = new Set(items.map((item) => item.key))
 const noMonitoredUsers: string[] = []
 
@@ -45,12 +46,14 @@ export function AdminSettingsPage() {
   const [runtime, setRuntime] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
+    if (auth.session.mode === 'lab' && !labSectionKeys.has(selected)) return
     if (!auth.session.authenticated || !isAdminRole(auth.session.user?.role)) return
     void getOverview().then(setOverview)
     void getRuntime().then(setRuntime)
-  }, [auth.session.authenticated, auth.session.user?.role])
+  }, [auth.session.authenticated, auth.session.mode, auth.session.user?.role, selected])
 
   if (auth.loading) return <div className="boot-screen"><Spin /></div>
+  if (auth.session.mode === 'lab' && !labSectionKeys.has(selected)) return <Navigate to="/app" replace />
   if (!auth.session.authenticated) return <Navigate to="/login" replace />
   if (!isAdminRole(auth.session.user?.role)) return <Navigate to="/app" replace />
   if (!sectionKeys.has(selected)) return <Navigate to="/admin/settings/overview" replace />
@@ -62,13 +65,13 @@ export function AdminSettingsPage() {
           <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/app')} />
           <div>
             <Typography.Text strong>系统设置</Typography.Text>
-            <Typography.Text type="secondary">管理员控制面</Typography.Text>
+            <Typography.Text type="secondary">{auth.session.mode === 'lab' ? 'Lab 实例管理' : '管理员控制面'}</Typography.Text>
           </div>
         </div>
         <Menu
           mode="inline"
           selectedKeys={[selected]}
-          items={items}
+          items={auth.session.mode === 'lab' ? items.filter((item) => labSectionKeys.has(item.key)) : items}
           onSelect={({ key }) => navigate(`/admin/settings/${key}`)}
         />
       </aside>
@@ -80,7 +83,7 @@ export function AdminSettingsPage() {
         ) : selected === 'system' ? (
           <SystemSettings runtime={runtime} />
         ) : (
-          <DomainSettingsSection key={selected} domain={selected} />
+          <DomainSettingsSection key={selected} domain={selected} isLab={auth.session.mode === 'lab'} />
         )}
       </main>
     </Layout>

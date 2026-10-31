@@ -6,6 +6,7 @@ export type AuthUser = {
 
 export type AuthSession = {
   authenticated: boolean
+  mode?: 'lab' | 'serve'
   user: AuthUser | null
   totp_enabled: boolean
   registration_enabled: boolean

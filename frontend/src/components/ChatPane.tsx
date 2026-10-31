@@ -53,6 +53,7 @@ import type {
 const { TextArea } = Input
 
 type ChatPaneProps = {
+  isLab: boolean
   automationExecution: AutomationExecutionState | null
   automationRecording: AutomationRecordingState
   availableBuiltinTools: BuiltinToolOption[]
@@ -103,6 +104,7 @@ type ChatPaneProps = {
 
 export function ChatPane(props: ChatPaneProps) {
   const {
+    isLab,
     availableBuiltinTools,
     automationExecution,
     automationRecording,
@@ -282,7 +284,7 @@ export function ChatPane(props: ChatPaneProps) {
         <Space size={10}>
           <GithubButton className="workspace-github-button" />
           <ThemeToggle className="workspace-theme-toggle" />
-          {!isMobile && (
+          {!isLab && !isMobile && (
             <Button icon={<LogoutOutlined />} onClick={() => void onLogout()}>
               退出
             </Button>
@@ -316,7 +318,7 @@ export function ChatPane(props: ChatPaneProps) {
                 </Button>
               </div>
             )}
-            <div className="automation-record-bar">
+            {!isLab ? <div className="automation-record-bar">
               <Space size={8} wrap>
                 {!automationRecording.active ? (
                   <Button
@@ -357,7 +359,7 @@ export function ChatPane(props: ChatPaneProps) {
                   <Typography.Text type="danger">{automationRecording.warning}</Typography.Text>
                 ) : null}
               </Space>
-            </div>
+            </div> : null}
             <div className="composer-mode-row">
               <Space wrap align="center" size={10}>
                 <Segmented

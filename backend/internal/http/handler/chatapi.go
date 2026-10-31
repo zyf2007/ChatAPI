@@ -52,8 +52,13 @@ func (h ChatAPIHandler) AnthropicMessages(w http.ResponseWriter, r *http.Request
 }
 
 func (h ChatAPIHandler) ListModels(w http.ResponseWriter, r *http.Request) {
-	principal, ok := modelkey.PrincipalFromContext(r.Context())
-	if !ok || strings.TrimSpace(principal.UserID) == "" || h.Catalog == nil {
+	ownerID := ""
+	if principal, ok := modelkey.PrincipalFromContext(r.Context()); ok {
+		ownerID = strings.TrimSpace(principal.UserID)
+	} else if value, ok := labOwnerID(r); ok {
+		ownerID = value
+	}
+	if ownerID == "" || h.Catalog == nil {
 		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]any{
 			"error": map[string]any{
 				"message": "unauthorized",
@@ -63,9 +68,9 @@ func (h ChatAPIHandler) ListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.Catalog.ListModelsForPrincipal(r.Context())
+	items, err := h.Catalog.ListModelsForOwner(r.Context(), ownerID)
 	if err != nil {
-		logging.BindContext(h.Logger, r.Context(), zap.String("owner.id", principal.UserID)).Error("list models failed", zap.Error(err))
+		logging.BindContext(h.Logger, r.Context(), zap.String("owner.id", ownerID)).Error("list models failed", zap.Error(err))
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]any{
 			"error": map[string]any{
 				"message": "internal server error",

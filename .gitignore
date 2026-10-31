@@ -10,6 +10,7 @@ logs/
 *.log
 tests/.sse-probe-logs/
 tests/.protocol-stream-probe-results.json
+tests/playwright/test-results/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

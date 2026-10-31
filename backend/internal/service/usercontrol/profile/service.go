@@ -7,6 +7,7 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/config"
 	"github.com/zyf2007/ChatAPI/internal/ops/observability/logging"
 	"github.com/zyf2007/ChatAPI/internal/repository/common"
+	labauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/lab"
 	localauth "github.com/zyf2007/ChatAPI/internal/service/auth/authn/local"
 	authsettings "github.com/zyf2007/ChatAPI/internal/service/auth/authn/settings"
 	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/policy"
@@ -67,6 +68,7 @@ type Service struct {
 }
 
 type SessionView struct {
+	Mode                          config.Mode    `json:"mode"`
 	Authenticated                 bool           `json:"authenticated"`
 	User                          map[string]any `json:"user"`
 	TOTPEnabled                   bool           `json:"totp_enabled"`
@@ -101,6 +103,18 @@ func New(deps Deps) *Service {
 	}
 }
 
+// BuildLabSessionView uses workspace policy sources without loading a Serve account.
+func (s *Service) BuildLabSessionView(ctx context.Context, cfg config.Config) SessionView {
+	return SessionView{
+		Mode:                          config.ModeLab,
+		Authenticated:                 true,
+		User:                          map[string]any{"id": labauth.DefaultOwnerID, "username": "lab", "role": "admin"},
+		RealtimeMaxConnectionsPerUser: s.realtimeLimit(ctx, cfg),
+		CurrentConversationCount:      s.conversationCount(ctx, labauth.DefaultOwnerID),
+		UserConversationLimit:         s.conversationLimitFor(ctx),
+	}
+}
+
 func (s *Service) BuildAnonymousSessionView(ctx context.Context, cfg config.Config) (SessionView, error) {
 	settings, err := s.PublicSettings(ctx, cfg)
 	if err != nil {
@@ -108,6 +122,7 @@ func (s *Service) BuildAnonymousSessionView(ctx context.Context, cfg config.Conf
 		return SessionView{}, err
 	}
 	view := SessionView{
+		Mode:                          cfg.Mode,
 		Authenticated:                 false,
 		User:                          nil,
 		TOTPEnabled:                   false,
@@ -143,6 +158,7 @@ func (s *Service) BuildAuthenticatedSessionView(ctx context.Context, cfg config.
 		return SessionView{}, err
 	}
 	view := SessionView{
+		Mode:          cfg.Mode,
 		Authenticated: true,
 		User: map[string]any{
 			"id":       user.ID,

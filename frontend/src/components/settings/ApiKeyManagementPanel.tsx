@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { Button, Form, Input, Popconfirm, Table, Tabs, Typography } from 'antd'
 import { CopyOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 
+import { VirtualModelsPanel } from './VirtualModelsPanel'
 import { appMessage } from '../../lib/antdMessage'
 import { requestJson } from '../../lib/api'
-import type { ApiKeyInfo, ApiKeyListResponse, ModelKeyInfo, VirtualModelInfo } from '../../types/chat'
+import type { ApiKeyInfo, ApiKeyListResponse, ModelKeyInfo } from '../../types/chat'
 
 type ApiKeyManagementPanelProps = {
   open: boolean
@@ -13,17 +14,14 @@ type ApiKeyManagementPanelProps = {
 export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
   const [appKeys, setAppKeys] = useState<ApiKeyInfo[]>([])
   const [modelKeys, setModelKeys] = useState<ModelKeyInfo[]>([])
-  const [virtualModels, setVirtualModels] = useState<VirtualModelInfo[]>([])
   const [appLoading, setAppLoading] = useState(false)
   const [modelLoading, setModelLoading] = useState(false)
   const [creatingAppKey, setCreatingAppKey] = useState(false)
   const [creatingModelKey, setCreatingModelKey] = useState(false)
-  const [creatingVirtualModel, setCreatingVirtualModel] = useState(false)
   const [deletingId, setDeletingId] = useState('')
   const [apiKeyLimit, setApiKeyLimit] = useState(0)
   const [appForm] = Form.useForm()
   const [modelForm] = Form.useForm()
-  const [virtualModelForm] = Form.useForm()
 
   useEffect(() => {
     if (!open) return
@@ -57,18 +55,8 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
       }
     }
 
-    async function loadVirtualModels() {
-      try {
-        const data = await requestJson<{ ok: boolean; items: VirtualModelInfo[] }>('/api/user/virtual-models')
-        if (active) setVirtualModels(Array.isArray(data.items) ? data.items : [])
-      } catch (error) {
-        if (active) appMessage.error(error instanceof Error ? error.message : '加载虚拟模型列表失败')
-      }
-    }
-
     void loadAppKeys()
     void loadModelKeys()
-    void loadVirtualModels()
     return () => { active = false }
   }, [open])
 
@@ -125,16 +113,6 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
     }
   }
 
-  async function handleCreateVirtualModel(values: { name: string }) {
-    setCreatingVirtualModel(true)
-    try {
-      const data = await requestJson<{ ok: boolean; item: VirtualModelInfo }>('/api/user/virtual-models', { method: 'POST', body: JSON.stringify(values) })
-      setVirtualModels((prev) => [...prev, data.item])
-      virtualModelForm.resetFields()
-      appMessage.success('虚拟模型已添加')
-    } catch (error) { appMessage.error(error instanceof Error ? error.message : '添加虚拟模型失败') } finally { setCreatingVirtualModel(false) }
-  }
-
   async function handleDeleteAppKey(keyId: string) {
     setDeletingId(keyId)
     try {
@@ -159,12 +137,6 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
     } finally {
       setDeletingId('')
     }
-  }
-
-  async function handleDeleteVirtualModel(modelId: string) {
-    setDeletingId(modelId)
-    try { await requestJson(`/api/user/virtual-models/${modelId}`, { method: 'DELETE' }); setVirtualModels((prev) => prev.filter((item) => item.id !== modelId)); appMessage.success('虚拟模型已删除') }
-    catch (error) { appMessage.error(error instanceof Error ? error.message : '删除虚拟模型失败') } finally { setDeletingId('') }
   }
 
   async function copyKey(kind: 'api-keys' | 'model-keys', keyId: string) {
@@ -255,21 +227,11 @@ export function ApiKeyManagementPanel({ open }: ApiKeyManagementPanelProps) {
     },
   ]
 
-  const virtualModelColumns = [
-    { title: '名称', dataIndex: 'name', key: 'name' },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v: string) => new Date(v).toLocaleString() },
-    { title: '操作', key: 'action', render: (_: unknown, record: VirtualModelInfo) => <Popconfirm title="确定删除该虚拟模型？" onConfirm={() => handleDeleteVirtualModel(record.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}><Button type="link" danger icon={<DeleteOutlined />} loading={deletingId === record.id}>删除</Button></Popconfirm> },
-  ]
-
   return (
     <Tabs
       items={[
         {
-          key: 'virtual-models', label: '虚拟模型管理', children: <div className="api-key-management-panel">
-            <div className="api-key-management-header"><Typography.Text className="api-key-management-subtitle">管理可通过虚拟模型 API 使用的模型名称。</Typography.Text><Button type="primary" icon={<PlusOutlined />} onClick={() => virtualModelForm.submit()}>添加虚拟模型</Button></div>
-            <Form form={virtualModelForm} layout="vertical" onFinish={handleCreateVirtualModel} className="api-key-management-form"><Form.Item name="name" label="虚拟模型名称" rules={[{ required: true, message: '请输入虚拟模型名称' }]}><Input placeholder="例如 kirari-chat, test-model" allowClear /></Form.Item><Form.Item><Button type="primary" htmlType="submit" icon={<PlusOutlined />} loading={creatingVirtualModel}>添加</Button></Form.Item></Form>
-            <Table className="api-key-management-table" columns={virtualModelColumns} dataSource={virtualModels} rowKey="id" pagination={false} size="small" />
-          </div>,
+          key: 'virtual-models', label: '虚拟模型管理', children: <VirtualModelsPanel open={open} />,
         },
         {
           key: 'model-keys',

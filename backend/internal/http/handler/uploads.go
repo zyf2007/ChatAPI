@@ -13,7 +13,6 @@ import (
 	"github.com/zyf2007/ChatAPI/internal/http/httpx"
 	"github.com/zyf2007/ChatAPI/internal/platform/media"
 	"github.com/zyf2007/ChatAPI/internal/repository/storage"
-	"github.com/zyf2007/ChatAPI/internal/service/auth/authz/session"
 	outputassetsvc "github.com/zyf2007/ChatAPI/internal/service/chat/outputasset"
 	turnsvc "github.com/zyf2007/ChatAPI/internal/service/chat/turn"
 )
@@ -29,8 +28,8 @@ type UploadHandler struct {
 }
 
 func (h UploadHandler) UploadOutputImage(w http.ResponseWriter, r *http.Request) {
-	principal, ok := session.PrincipalFromContext(r.Context())
-	if !ok || strings.TrimSpace(principal.UserID) == "" {
+	ownerID, ok := sessionOrLabOwnerID(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -55,7 +54,7 @@ func (h UploadHandler) UploadOutputImage(w http.ResponseWriter, r *http.Request)
 	}
 	defer file.Close()
 	conversationID := strings.TrimSpace(chi.URLParam(r, "conversationID"))
-	result, err := h.OutputImages.UploadOutputImage(r.Context(), principal.UserID, conversationID, header.Filename, header.Header.Get("Content-Type"), file)
+	result, err := h.OutputImages.UploadOutputImage(r.Context(), ownerID, conversationID, header.Filename, header.Header.Get("Content-Type"), file)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, outputassetsvc.ErrAssetNotFound) || errors.Is(err, turnsvc.ErrPendingNotFound) {
@@ -72,8 +71,8 @@ func (h UploadHandler) UploadOutputImage(w http.ResponseWriter, r *http.Request)
 }
 
 func (h UploadHandler) GetImage(w http.ResponseWriter, r *http.Request) {
-	principal, ok := session.PrincipalFromContext(r.Context())
-	if !ok || strings.TrimSpace(principal.UserID) == "" {
+	ownerID, ok := sessionOrLabOwnerID(r)
+	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -83,7 +82,7 @@ func (h UploadHandler) GetImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	asset, err := h.Storage.GetMediaAssetByFileID(r.Context(), fileID)
-	if err != nil || strings.TrimSpace(asset.OwnerID) != strings.TrimSpace(principal.UserID) {
+	if err != nil || strings.TrimSpace(asset.OwnerID) != ownerID {
 		http.NotFound(w, r)
 		return
 	}
